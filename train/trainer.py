@@ -200,8 +200,8 @@ class Trainer(object):
                                                                                    mixture_lengths)
             elif self.mode == 'audio-visual':
                 estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
-                loss = self.loss_func(estimate_source, padded_source)
-
+                loss = self.loss_func(estimate_source, padded_source).mean()
+                # print(loss)
             if not cross_valid:
                 self.optimizer.zero_grad()
                 loss.backward()

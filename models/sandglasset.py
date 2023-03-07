@@ -464,6 +464,44 @@ class Sandglasset(nn.Module):
         _pad = torch.zeros(size=(B, 1, self.stride)).to(x.device, dtype=torch.float)
         x = torch.cat([_pad, x, _pad], dim=2)
         return x, gap 
+    
+    @classmethod
+    def load_model(cls, path):
+        package = torch.load(path, map_location=lambda storage, loc: storage)
+        model = cls.load_model_from_package(package)
+        return model
+
+    @classmethod
+    def load_model_from_package(cls, package):
+        model = cls(in_channels=package['in_channels'], out_channels=package['out_channels'],
+                    kernel_size=package['kernel_size'], length=package['length'],
+                    hidden_channels=package['hidden_channels'], num_layers=package['num_layers'],
+                    bidirectional=package['bidirectional'], num_heads=package['num_heads'],
+                    depth=package['depth'], speakers=package['speakers'])
+        model.load_state_dict(package['state_dict'])
+        return model
+
+    @staticmethod
+    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
+        package = {
+            # hyper-parameter
+            'in_channels': model.in_channels, 'out_channels': model.out_channels,
+            'kernel_size': model.kernel_size, 'length': model.length,
+            'hidden_channels': model.hidden_channels, 'num_layers': model.num_layers,
+            'bidirectional': model.bidirectional, 'num_heads': model.num_heads,
+            'depth': model.depth, 'speakers': model.speakers,
+            'mode': 'audio-visual',
+            # state
+            'state_dict': model.state_dict(),
+            'optim_dict': optimizer.state_dict(),
+            'epoch': epoch
+        }
+
+        if tr_loss is not None:
+            package['tr_loss'] = tr_loss
+            package['cv_loss'] = cv_loss
+        return package
+
 
 if __name__ == '__main__':
     input_audio = torch.randn(size=(1, 1, 32000)).to('cpu')
