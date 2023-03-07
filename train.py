@@ -3,6 +3,7 @@ import torch
 from data.dataset import AudioDataLoader, AudioDataset
 from train.trainer import Trainer
 from models.sandglasset import Sandglasset
+from models.av_sandglasset import AVfusedSandglasset
 import json5
 import numpy as np
 from adamp import AdamP, SGDP
@@ -24,12 +25,14 @@ def main(config):
                               segment=config["validation_dataset"]["segment"],
                               cv_max_len=config["validation_dataset"]["cv_max_len"])
 
-    tr_loader = AudioDataLoader(tr_dataset,
+    tr_loader = AudioDataLoader(_mode=config["model"]["mode"],
+                                dataset=tr_dataset,
                                 batch_size=config["train_loader"]["batch_size"],
                                 shuffle=config["train_loader"]["shuffle"],
                                 num_workers=config["train_loader"]["num_workers"])
 
-    cv_loader = AudioDataLoader(cv_dataset,
+    cv_loader = AudioDataLoader(_mode=config["model"]["mode"],
+                                dataset=cv_dataset,
                                 batch_size=config["validation_loader"]["batch_size"],
                                 shuffle=config["validation_loader"]["shuffle"],
                                 num_workers=config["validation_loader"]["num_workers"])
@@ -49,8 +52,21 @@ def main(config):
                             depth=config["model"]["sandglasset"]["depth"],
                             # cycle_amount=config['model']['sandglasset']['depth']*2,
                             speakers=config["model"]["sandglasset"]["speakers"])
+    elif config["model"]["type"] == 'av_sandglasset':
+        model = AVfusedSandglasset(in_channels=config["model"]["sandglasset"]["in_channels"],
+                            out_channels=config["model"]["sandglasset"]["out_channels"],
+                            kernel_size=config["model"]["sandglasset"]["kernel_size"],
+                            length=config["model"]["sandglasset"]["length"],
+                            hidden_channels=config["model"]["sandglasset"]["hidden_channels"],
+                            num_layers=config["model"]["sandglasset"]["num_layers"],
+                            bidirectional=config["model"]["sandglasset"]["bidirectional"],
+                            num_heads=config["model"]["sandglasset"]["num_heads"],
+                            depth=config["model"]["sandglasset"]["depth"],
+                            video_model=config["model"]["sandglasset"]["video_model"],
+                            # cycle_amount=config['model']['sandglasset']['depth']*2,
+                            speakers=config["model"]["sandglasset"]["speakers"])
     else:
-        print("No loaded model!")
+        print("No loaded model! models: [\'sandglasset\', \'av_sandglasset\']")
 
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model)

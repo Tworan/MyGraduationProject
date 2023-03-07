@@ -34,7 +34,8 @@
 
   "model":
   {
-    "type": "sandglasset",
+    "type": "av_sandglasset",
+    "mode": "audio-visual",
 
     "sandglasset":
     {
@@ -47,7 +48,8 @@
       "bidirectional": true,
       "num_heads": 8,
       "depth": 3,
-      "speakers": 2
+      "speakers": 2,
+      "video_model": "/home/photon/MyGraduationProject/frcnn_128_512.backbone.pth.tar"
     }
   },
 

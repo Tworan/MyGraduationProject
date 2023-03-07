@@ -62,9 +62,9 @@ class Segementation(nn.Module):
         B, N, L = x.shape
         gap = self.K - L % self.P
         #     200 - 31999 % 100
-        pad = torch.zeros([B, N, gap]).to(dtype=torch.float)
+        pad = torch.zeros([B, N, gap]).to(x.device, dtype=torch.float)
         x = torch.cat([x, pad], dim=2)
-        _pad = torch.zeros(size=(B, N, self.P)).to(dtype=torch.float)
+        _pad = torch.zeros(size=(B, N, self.P)).to(x.device, dtype=torch.float)
         x = torch.cat([_pad, x, _pad], dim=2)
         return x, gap 
 
@@ -124,7 +124,7 @@ class Positional_Encoding(nn.Module):
         pe = torch.zeros(max_len, d_model, requires_grad=False)
         position = torch.arange(0, max_len).unsqueeze(1).float()
         # position: [max_len, 1]
-        div_term = torch.exp(torch.arange(0, d_model, 2).float()) * -(math.log(10000.) / d_model)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
@@ -418,7 +418,7 @@ class Decoder(nn.Module):
         return x 
 
 class AVfusedSandglasset(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, length, video_model, video_inchannels, hidden_channels=128,
+    def __init__(self, in_channels, out_channels, kernel_size, length, video_model, video_inchannels=512, hidden_channels=128,
                  num_layers=1, bidirectional=True, num_heads=8, depth=3, speakers=2, using_convT_to_upsample=True):
         super(AVfusedSandglasset, self).__init__()
         self.in_channels = in_channels
@@ -467,7 +467,7 @@ class AVfusedSandglasset(nn.Module):
         
         m = self.Separation(e, v)
         outs = [m[i] * e for i in range(self.speakers)]
-        audios = [self.Decoder(outs[i])[:, :, self.stride: -(self.stride+self.stride)] for i in range(self.speakers)]
+        audios = [self.Decoder(outs[i])[:, :, self.stride: -(gap+self.stride)] for i in range(self.speakers)]
         # audios: [[B, 1, L]]
         return torch.cat(audios, dim=1)
 
@@ -480,9 +480,9 @@ class AVfusedSandglasset(nn.Module):
         B, _, L = x.shape
         gap = self.kernel_size - L % (self.stride)
         #     200 - 31999 % 100
-        pad = torch.zeros([B, 1, gap]).to(dtype=torch.float)
+        pad = torch.zeros([B, 1, gap]).to(x.device, dtype=torch.float)
         x = torch.cat([x, pad], dim=2)
-        _pad = torch.zeros(size=(B, 1, self.stride)).to(dtype=torch.float)
+        _pad = torch.zeros(size=(B, 1, self.stride)).to(x.device, dtype=torch.float)
         x = torch.cat([_pad, x, _pad], dim=2)
         return x, gap 
 

@@ -143,14 +143,17 @@ class AudioDataLoader(data.DataLoader):
         NOTE: 这里只使用 batch_size = 1，所以 drop_last = True 在这里没有意义
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, _mode, *args, **kwargs):
 
         super(AudioDataLoader, self).__init__(*args, **kwargs)
+        # print(kwargs)
+        self.mode = _mode
+        if self.mode == 'audio-only':
+            self.collate_fn = _collate_fn_audio
+        elif self.mode == 'audio-visual':
+            self.collate_fn = _collate_fn_audio_visual
 
-        self.collate_fn = _collate_fn
-
-
-def _collate_fn(batch):
+def _collate_fn_audio(batch):
     """
         Args:
             batch: list, len(batch) = 1. See AudioDataset.__getitem__()
@@ -175,6 +178,31 @@ def _collate_fn(batch):
     # print(mixtures_pad.shape, sources_pad.shape)
     return mixtures_pad.unsqueeze(1), lens, sources_pad
 
+def _collate_fn_audio_visual(batch):
+    """
+        Args:
+            batch: list, len(batch) = 1. See AudioDataset.__getitem__()
+        Returns:
+            mixtures_pad: B x T, torch.Tensor
+            ilens: B, torch.Tentor
+            sources_pad: B x C x T, torch.Tensor
+    """
+    assert len(batch) == 1
+    
+    mixtures, sources, faces = load_data_audio_visual(batch[0])
+
+    # 获取输入序列长度
+    lens = np.array([mix.shape[0] for mix in mixtures])
+
+    # 执行填充和转换为张量
+    pad_value = 0
+    mixtures_pad = pad_list([torch.from_numpy(mix).float() for mix in mixtures], pad_value)  # 补零，保证长度一样
+    lens = torch.from_numpy(lens)  # 转换为张量
+    sources_pad = pad_list([torch.from_numpy(s).float() for s in sources], pad_value)  # 补零，保证长度一样
+    sources_pad = sources_pad.permute((0, 2, 1)).contiguous()  # N x T x C -> N x C x T
+    # print(mixtures_pad.shape, sources_pad.shape)
+    return mixtures_pad.unsqueeze(1), lens, sources_pad, torch.Tensor(faces)
+
 def load_data_audio_visual(batch):
     """
     batch: 
@@ -194,7 +222,8 @@ def load_data_audio_visual(batch):
         s2_path = s2_v2_info[0]
         v2_path = s2_v2_info[1]
 
-        assert mix_info[1] == s1_v1_info[1] and s1_v1_info[1] == s2_v2_info[1]
+        # print(mix_info, s1_v1_info, s2_v2_info)
+        assert mix_info[1] == s1_v1_info[2] and s1_v1_info[2] == s2_v2_info[2]
         # 读取语音数据
         mix, _ = librosa.load(mix_path, sr=sample_rate)
         # print(mix_path)

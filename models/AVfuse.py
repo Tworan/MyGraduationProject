@@ -1,6 +1,7 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+from VideoFeatureExtractor.VideoModel import VideoModel
 
 class pre_v(nn.Module):
     def __init__(self, videomodel, video_embeded_size=512, kernel_size=5):
@@ -10,7 +11,10 @@ class pre_v(nn.Module):
         output: [B, T, n_channels]
         """
         super(pre_v, self).__init__()
-        self.videomodel = videomodel
+        self.videomodel = VideoModel()
+        # video_features = model(input_video)
+        # print(video_features.shape)
+        self.videomodel.load_state_dict(torch.load(videomodel)['model_state_dict'])
         self.spks_fuse = nn.Sequential(
             nn.Conv2d(in_channels=video_embeded_size,
                       out_channels=video_embeded_size,

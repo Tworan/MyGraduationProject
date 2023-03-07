@@ -4,6 +4,7 @@ import torch
 from train.pit_criterion import cal_loss
 from torch.utils.tensorboard import SummaryWriter
 import gc
+from asteroid.losses.sdr import MultiSrcNegSDR, multisrc_neg_sisdr
 
 
 class Trainer(object):
@@ -30,6 +31,9 @@ class Trainer(object):
         # logging
         self.print_freq = config["logging"]["print_freq"]
 
+        # mode
+        self.mode = config["model"]["mode"]
+
         # loss
         self.tr_loss = torch.Tensor(self.epochs)
         self.cv_loss = torch.Tensor(self.epochs)
@@ -45,6 +49,8 @@ class Trainer(object):
         self.write = SummaryWriter("./logs")
 
         self._reset()
+        # self.loss_func = MultiSrcNegSDR('sisdr')
+        self.loss_func = multisrc_neg_sisdr
 
     def _reset(self):
         if self.continue_from:
@@ -172,20 +178,29 @@ class Trainer(object):
         data_loader = self.tr_loader if not cross_valid else self.cv_loader  # 数据集切换
 
         for i, (data) in enumerate(data_loader):
-
-            padded_mixture, mixture_lengths, padded_source = data
+            if self.mode == 'audio-only':
+                padded_mixture, mixture_lengths, padded_source = data
+            elif self.mode == 'audio-visual':
+                padded_mixture, mixture_lengths, padded_source, padded_face = data
 
             # 是否使用 GPU 训练
             if torch.cuda.is_available():
                 padded_mixture = padded_mixture.cuda()
                 mixture_lengths = mixture_lengths.cuda()
                 padded_source = padded_source.cuda()
+                if self.mode == 'audio-visual':
+                    padded_face = padded_face.cuda()
             # print(padded_mixture.shape)
-            estimate_source = self.model(padded_mixture)  # 将数据放入模型
             # print(estimate_source.shape)
-            loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
-                                                                               estimate_source,
-                                                                               mixture_lengths)
+            # 计算损失
+            if self.mode == 'audio-only':
+                estimate_source = self.model(padded_mixture)  # 将数据放入模型
+                loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
+                                                                                   estimate_source,
+                                                                                   mixture_lengths)
+            elif self.mode == 'audio-visual':
+                estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
+                loss = self.loss_func(estimate_source, padded_source)
 
             if not cross_valid:
                 self.optimizer.zero_grad()
