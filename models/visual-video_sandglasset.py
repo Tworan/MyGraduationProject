@@ -3,7 +3,7 @@ import torch.nn as nn
 import sys
 sys.path.append('/home/photon/MyGraduationProject')
 import math
-from models.AVfuse import AVfuse
+from models.AVfuse import AVfuse, pre_v
 from VideoFeatureExtractor.VideoModel import VideoModel
 
 class Encoder(nn.Module):
@@ -291,7 +291,7 @@ class Separation(nn.Module):
             )
         
         self.AVfuse_Segmentation = [Segementation(K=length) for i in range(self.depth*2)]
-        
+
         self.AVfuse_net = AVfuse(audio_in_channels=out_channels,
                                  video_in_channels=video_inchannels,
                                  kernel_size=5,
@@ -434,7 +434,9 @@ class AVfusedSandglasset(nn.Module):
         self.using_convT_to_upsample = using_convT_to_upsample
         self.speakers = speakers
 
-        self.video_model = video_model
+        self.pre_v = pre_v(videomodel=video_model, video_embeded_size=512, kernel_size=5)
+
+        # self.video_model = video_model
 
         self.Encoder = Encoder(out_channels=in_channels, kernel_size=kernel_size)
 
@@ -461,8 +463,7 @@ class AVfusedSandglasset(nn.Module):
         x, gap = self._padding(x)
         e = self.Encoder(x)
         # v
-        with torch.no_grad():
-            v = self.video_model(v)
+        v = self.pre_v(v)
         
         m = self.Separation(e, v)
         outs = [m[i] * e for i in range(self.speakers)]
@@ -487,10 +488,11 @@ class AVfusedSandglasset(nn.Module):
 
 if __name__ == '__main__':
     input_audio = torch.randn(size=(1, 1, 32000)).to('cpu')
-    input_video = torch.randn(size=(1, 1, 100, 96, 96)).to('cpu')
+    input_video = torch.randn(size=(1, 2, 100, 96, 96)).to('cpu')
     # []
     model = VideoModel()
-    video_features = model(input_video)
+    # video_features = model(input_video)
+    # print(video_features.shape)
     model.load_state_dict(torch.load('frcnn_128_512.backbone.pth.tar')['model_state_dict'])
     print('model load successfully')
     

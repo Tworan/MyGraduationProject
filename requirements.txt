@@ -1,0 +1,5 @@
+torch
+numpy
+adamp
+json5
+librosa

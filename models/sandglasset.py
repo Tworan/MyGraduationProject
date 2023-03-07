@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn 
 import sys
 import math
+import time
+
 
 class Encoder(nn.Module):
     def __init__(self, out_channels, kernel_size, act='relu'):
@@ -48,7 +50,7 @@ class Segementation(nn.Module):
         # x: [B, N, S, K]
         x = x.transpose(2, 3)
         # x: [B, N, K, S]
-        print(x.shape)
+        # print(x.shape)
         return x.contiguous(), gap 
 
     def _padding(self, x):
@@ -60,9 +62,9 @@ class Segementation(nn.Module):
         B, N, L = x.shape
         gap = self.K - L % self.P
         #     200 - 31999 % 100
-        pad = torch.zeros([B, N, gap]).to(dtype=torch.float)
+        pad = torch.zeros([B, N, gap]).to(x.device, dtype=torch.float)
         x = torch.cat([x, pad], dim=2)
-        _pad = torch.zeros(size=(B, N, self.P)).to(dtype=torch.float)
+        _pad = torch.zeros(size=(B, N, self.P)).to(x.device, dtype=torch.float)
         x = torch.cat([_pad, x, _pad], dim=2)
         return x, gap 
 
@@ -113,7 +115,7 @@ class Positional_Encoding(nn.Module):
     """
         Positional Encoding
     """
-    def __init__(self, d_model, max_len=32000 * 4):
+    def __init__(self, d_model, max_len=32000):
         """
         d_model: Feature
         max_len: max lens of the seqs
@@ -122,7 +124,7 @@ class Positional_Encoding(nn.Module):
         pe = torch.zeros(max_len, d_model, requires_grad=False)
         position = torch.arange(0, max_len).unsqueeze(1).float()
         # position: [max_len, 1]
-        div_term = torch.exp(torch.arange(0, d_model, 2).float()) * -(math.log(10000.) / d_model)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
@@ -135,6 +137,7 @@ class Positional_Encoding(nn.Module):
         """
         length = x.size(1)
         return self.pe[:, :length]
+
         
 class Globally_Attentive(nn.Module):
     def __init__(self, in_channels, num_heads=8):
@@ -228,6 +231,7 @@ class Sandglasset_Block(nn.Module):
         x = x.permute(0, 3, 2, 1).contiguous()
         # x: [B, S, K, N]
         x = self.LayerNorm(x)
+
         x = x.permute(0, 2, 3, 1).contiguous()
         # x: [B, K, N, S]
         # do downsample
@@ -254,7 +258,7 @@ class Sandglasset_Block(nn.Module):
     
 class Separation(nn.Module):
     def __init__(self, in_channels, out_channels, length, hidden_channels=128,
-                 num_layers=1, bidirectional=True, num_heads=8, depth=6, speakers=2, using_convT_to_upsample=True):
+                 num_layers=1, bidirectional=True, num_heads=8, depth=3, speakers=2, using_convT_to_upsample=True):
         super(Separation, self).__init__()
         self.LayerNorm = nn.LayerNorm(normalized_shape=in_channels)
         # features expension
@@ -294,8 +298,7 @@ class Separation(nn.Module):
 
         self.Conv2d = nn.Conv2d(in_channels=out_channels,
                                 out_channels=speakers*out_channels,
-                                kernel_size=1,
-                                groups=out_channels)
+                                kernel_size=1,)
 
         self.output = nn.Sequential(nn.Conv1d(in_channels=out_channels,
                                               out_channels=out_channels,
@@ -358,7 +361,7 @@ class Separation(nn.Module):
         
         x = self.ReLU(x)
 
-        x = x.permute(1, 0, 2, 3).contiguous()
+        x = x.transpose(0, 1).contiguous()
         # x: [spk, B, N, L]
         return x
 
@@ -371,7 +374,7 @@ class Separation(nn.Module):
         B, N, K, S = x.shape 
         P = K // 2
         
-        x = x.permute(0, 1, 3, 2).contiguous()
+        x = x.transpose(2, 3).contiguous()
         # x: [B, N, S, K]
         x = x.view(B, N, -1, K * 2)
         left = x[:, :, :, :K].contiguous().view(B, N, -1)[:, :, P:]
@@ -437,26 +440,28 @@ class Sandglasset(nn.Module):
         output: [B, spk, L]
         """
         # x, 
+        # print(x.shape)
         x, gap = self._padding(x)
         e = self.Encoder(x)
         m = self.Separation(e)
+        # print(m)
         outs = [m[i] * e for i in range(self.speakers)]
-        audios = [self.Decoder(outs[i])[:, :, self.stride: -(self.stride+self.stride)] for i in range(self.speakers)]
+        audios = [self.Decoder(outs[i])[:, :, self.stride: -(gap+self.stride)] for i in range(self.speakers)]
         # audios: [[B, 1, L]]
         return torch.cat(audios, dim=1)
 
     def _padding(self, x):
         """
-        describe: 填充至P的整数倍
+        descripition: 填充至P的整数倍
         input:  [B, 1, L]
         output: [B, 1, L]
         """
         B, _, L = x.shape
         gap = self.kernel_size - L % (self.stride)
         #     200 - 31999 % 100
-        pad = torch.zeros([B, 1, gap]).to(dtype=torch.float)
+        pad = torch.zeros([B, 1, gap]).to(x.device, dtype=torch.float)
         x = torch.cat([x, pad], dim=2)
-        _pad = torch.zeros(size=(B, 1, self.stride)).to(dtype=torch.float)
+        _pad = torch.zeros(size=(B, 1, self.stride)).to(x.device, dtype=torch.float)
         x = torch.cat([_pad, x, _pad], dim=2)
         return x, gap 
 
@@ -474,4 +479,4 @@ if __name__ == '__main__':
                         speakers=2,
                         using_convT_to_upsample=False).cpu()
     y = model(input_audio)
-    print('pass')
+    print('pass', y.shape)

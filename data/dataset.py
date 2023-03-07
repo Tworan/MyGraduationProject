@@ -6,7 +6,7 @@ import torch
 import torch.utils.data as data
 import librosa
 import sys
-sys.path.append('/home/photon/MyGraduationProject')
+sys.path.append('/home/photon/MyGraduationProject/data')
 from preprocess import preprocess_one_dir
 
 
@@ -172,8 +172,8 @@ def _collate_fn(batch):
     lens = torch.from_numpy(lens)  # 转换为张量
     sources_pad = pad_list([torch.from_numpy(s).float() for s in sources], pad_value)  # 补零，保证长度一样
     sources_pad = sources_pad.permute((0, 2, 1)).contiguous()  # N x T x C -> N x C x T
-
-    return mixtures_pad, lens, sources_pad
+    # print(mixtures_pad.shape, sources_pad.shape)
+    return mixtures_pad.unsqueeze(1), lens, sources_pad
 
 def load_data_audio_visual(batch):
     """
@@ -205,9 +205,10 @@ def load_data_audio_visual(batch):
         v2 = np.load(v2_path)['data']
         # v1 and v2 must be numpy array
         s = np.dstack((s1, s2))[0]  # 32000 x 2
-
+        v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
         mixtures.append(mix)
         sources.append(s)
+        faces.append(v)
     
     return mixtures, sources, faces
         
@@ -228,8 +229,8 @@ def load_data_audio_only(batch):
         mix_path = mix_info[0]
         s1_path = s1_info[0]
         s2_path = s2_info[0]
-
-        assert mix_info[1] == s1_info[1] and s1_info[1] == s2_info[1]
+        
+        assert mix_info[-1] == s1_info[-1] and s1_info[-1] == s2_info[-1]
         # 读取语音数据
         mix, _ = librosa.load(mix_path, sr=sample_rate)
         # print(mix_path)

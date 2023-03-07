@@ -2,6 +2,42 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class pre_v(nn.Module):
+    def __init__(self, videomodel, video_embeded_size=512, kernel_size=5):
+        """
+        descripition: preprocess before the avfuse. 
+        input: [B, n_src, T, H, W]
+        output: [B, T, n_channels]
+        """
+        super(pre_v, self).__init__()
+        self.videomodel = videomodel
+        self.spks_fuse = nn.Sequential(
+            nn.Conv2d(in_channels=video_embeded_size,
+                      out_channels=video_embeded_size,
+                      kernel_size=(2, kernel_size),
+                      stride=1,
+                      padding=[0, kernel_size//2],
+                      groups=video_embeded_size),
+            # nn.ReLU()
+        )
+
+    def forward(self, v):
+        B, n_src, T, H, W = v.shape
+        v = v.contiguous()
+        v = v.view(B*n_src, 1, T, H, W)
+        with torch.no_grad():
+            v = self.videomodel(v)
+        _, Nnew, Tnew = v.shape
+        v = v.view(B, n_src, Nnew, Tnew)
+        v = v.permute(0, 2, 1, 3).contiguous()
+        v = self.spks_fuse(v)
+        # v: [B, Nnew, 1, Tnew]
+        v = v.permute(0, 2, 1, 3).contiguous().squeeze(1)
+        # v: [B, Nnew, Tnew]
+        return v
+
+
+
 class AVfuse(nn.Module):
     def __init__(self, audio_in_channels, video_in_channels, kernel_size=5, stride=1, groups=1, using_residual=False):
         """
