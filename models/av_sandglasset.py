@@ -3,7 +3,7 @@ import torch.nn as nn
 import sys
 sys.path.append('/home/photon/MyGraduationProject')
 import math
-from models.AVfuse import AVfuse, pre_v
+from models.AVfuse import AVfuse, pre_v, VideoNet
 from VideoFeatureExtractor.VideoModel import VideoModel
 
 class Encoder(nn.Module):
@@ -207,8 +207,7 @@ class Sandglasset_Block(nn.Module):
                                                out_channels=in_channels,
                                                kernel_size=kernel_size,
                                                stride=stride,
-                                               padding=0,
-                                               groups=in_channels)
+                                               padding=0,)
         else:
             self.Upsample = nn.Sequential(nn.Upsample(scale_factor=kernel_size, mode='linear', align_corners=True),
                                           nn.Conv1d(in_channels=in_channels,
@@ -266,6 +265,7 @@ class Separation(nn.Module):
 
         self.depth = depth
 
+        self.VidoNet = VideoNet(in_channels=video_inchannels)
         kernel_size = []
         stride = []
         # 以4为缩放尺度 每层尺度*4
@@ -337,19 +337,21 @@ class Separation(nn.Module):
         x = self.LayerNorm(x)
         x = self.Linear(x).permute(0, 2, 1).contiguous()
         # x: [B, N, L]
-        x, gap = self.Segementation(x)
+        x, _gap = self.Segementation(x)
         # 残差连接
         self.residual = []
-
+        gap = _gap
         for i in range(2*self.depth):
             x = self.Sandglasset_Blocks[i](x)
+            v = self.VidoNet(v)
             # reshape
             # x: [B, N, K, S]
             # AVfuse
+            residual = x
             x = self._overlap_add(x, gap)
             x, v = self.AVfuse_net(x, v)
-            x, _ = self.AVfuse_Segmentation[i](x)   
-            residual = x
+            x, gap = self.AVfuse_Segmentation[i](x)   
+            
             if i < self.depth:
                 self.residual.append(residual)
             else:
@@ -365,7 +367,7 @@ class Separation(nn.Module):
 
         # do audio reconstruct
         x = x.view(B * self.spk, -1, K, S)
-        x = self._overlap_add(x, gap)
+        x = self._overlap_add(x, _gap)
         # x: [B * spk, N, L]
         x = self.output(x) * self.output_gate(x)
         # x: [B * spk, output_channels, L]
@@ -426,15 +428,15 @@ class AVfusedSandglasset(nn.Module):
         self.kernel_size = kernel_size
         self.stride = self.kernel_size // 2
         self.length = length
-        self.hidden_channles = hidden_channels
+        self.hidden_channels = hidden_channels
         self.num_layers = num_layers
-        self.bidirectinoal = bidirectional
+        self.bidirectional = bidirectional
         self.num_heads = num_heads
         self.depth = depth
         self.using_convT_to_upsample = using_convT_to_upsample
         self.speakers = speakers
 
-        self.pre_v = pre_v(videomodel=video_model, video_embeded_size=512, kernel_size=5)
+        self.pre_v = pre_v(videomodel=video_model, video_embeded_size=512, kernel_size=5, n_src=self.speakers)
 
         # self.video_model = video_model
 
@@ -493,12 +495,12 @@ class AVfusedSandglasset(nn.Module):
         return model
 
     @classmethod
-    def load_model_from_package(cls, package):
+    def load_model_from_package(cls, package, conf):
         model = cls(in_channels=package['in_channels'], out_channels=package['out_channels'],
                     kernel_size=package['kernel_size'], length=package['length'],
                     hidden_channels=package['hidden_channels'], num_layers=package['num_layers'],
                     bidirectional=package['bidirectional'], num_heads=package['num_heads'],
-                    depth=package['depth'], speakers=package['speakers'])
+                    depth=package['depth'], speakers=package['speakers'], video_model=conf['model']['sandglasset']['video_model'])
         model.load_state_dict(package['state_dict'])
         return model
 
@@ -530,7 +532,10 @@ if __name__ == '__main__':
     model = VideoModel()
     # video_features = model(input_video)
     # print(video_features.shape)
-    model.load_state_dict(torch.load('frcnn_128_512.backbone.pth.tar')['model_state_dict'])
+    state_dict = torch.load('frcnn_128_512.backbone.pth.tar')['model_state_dict']
+    # print(state_dict)
+    model.load_state_dict(state_dict)
+    # model(input_video)
     print('model load successfully')
     
     model = AVfusedSandglasset(in_channels=256,
@@ -544,7 +549,7 @@ if __name__ == '__main__':
                         num_heads=8,
                         depth=3,
                         speakers=2,
-                        video_model=model,
+                        video_model='frcnn_128_512.backbone.pth.tar',
                         using_convT_to_upsample=False).cpu()
     y = model(input_audio, input_video)
     print('pass')

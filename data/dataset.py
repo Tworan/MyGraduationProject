@@ -8,7 +8,9 @@ import librosa
 import sys
 sys.path.append('/home/photon/MyGraduationProject/data')
 from preprocess import preprocess_one_dir
+from transform import get_preprocessing_pipeline
 
+TRANSFORM_FLAG = False
 
 class AudioDataset(data.Dataset):
 
@@ -143,15 +145,21 @@ class AudioDataLoader(data.DataLoader):
         NOTE: 这里只使用 batch_size = 1，所以 drop_last = True 在这里没有意义
     """
 
-    def __init__(self, _mode, *args, **kwargs):
+    def __init__(self, _mode, _type, *args, **kwargs):
 
         super(AudioDataLoader, self).__init__(*args, **kwargs)
         # print(kwargs)
         self.mode = _mode
-        if self.mode == 'audio-only':
-            self.collate_fn = _collate_fn_audio
-        elif self.mode == 'audio-visual':
-            self.collate_fn = _collate_fn_audio_visual
+        if _type == 'tr':
+            if self.mode == 'audio-only':
+                self.collate_fn = _collate_fn_audio
+            elif self.mode == 'audio-visual':
+                self.collate_fn = _collate_fn_audio_visual_train
+        else:
+            if self.mode == 'audio-only':
+                self.collate_fn = _collate_fn_audio
+            elif self.mode == 'audio-visual':
+                self.collate_fn = _collate_fn_audio_visual_val
 
 def _collate_fn_audio(batch):
     """
@@ -178,7 +186,7 @@ def _collate_fn_audio(batch):
     # print(mixtures_pad.shape, sources_pad.shape)
     return mixtures_pad.unsqueeze(1), lens, sources_pad
 
-def _collate_fn_audio_visual(batch):
+def _collate_fn_audio_visual_train(batch):
     """
         Args:
             batch: list, len(batch) = 1. See AudioDataset.__getitem__()
@@ -189,7 +197,7 @@ def _collate_fn_audio_visual(batch):
     """
     assert len(batch) == 1
     
-    mixtures, sources, faces = load_data_audio_visual(batch[0])
+    mixtures, sources, faces = load_data_audio_visual(batch[0], train=True)
 
     # 获取输入序列长度
     lens = np.array([mix.shape[0] for mix in mixtures])
@@ -203,7 +211,32 @@ def _collate_fn_audio_visual(batch):
     # print(mixtures_pad.shape, sources_pad.shape)
     return mixtures_pad.unsqueeze(1), lens, sources_pad, torch.Tensor(faces)
 
-def load_data_audio_visual(batch):
+def _collate_fn_audio_visual_val(batch):
+    """
+        Args:
+            batch: list, len(batch) = 1. See AudioDataset.__getitem__()
+        Returns:
+            mixtures_pad: B x T, torch.Tensor
+            ilens: B, torch.Tentor
+            sources_pad: B x C x T, torch.Tensor
+    """
+    assert len(batch) == 1
+    
+    mixtures, sources, faces = load_data_audio_visual(batch[0], train=False)
+
+    # 获取输入序列长度
+    lens = np.array([mix.shape[0] for mix in mixtures])
+
+    # 执行填充和转换为张量
+    pad_value = 0
+    mixtures_pad = pad_list([torch.from_numpy(mix).float() for mix in mixtures], pad_value)  # 补零，保证长度一样
+    lens = torch.from_numpy(lens)  # 转换为张量
+    sources_pad = pad_list([torch.from_numpy(s).float() for s in sources], pad_value)  # 补零，保证长度一样
+    sources_pad = sources_pad.permute((0, 2, 1)).contiguous()  # N x T x C -> N x C x T
+    # print(mixtures_pad.shape, sources_pad.shape)
+    return mixtures_pad.unsqueeze(1), lens, sources_pad, torch.Tensor(faces)
+
+def load_data_audio_visual(batch, train=True):
     """
     batch: 
         [0]: [mix, length]
@@ -214,7 +247,7 @@ def load_data_audio_visual(batch):
     """
     mixtures, sources, faces = [], [], []
     mix_infos, s1_v1_infos, s2_v2_infos, sample_rate, segemnt_len = batch 
-
+    transform = get_preprocessing_pipeline()['train' if train else 'val']
     for mix_info, s1_v1_info, s2_v2_info in zip(mix_infos, s1_v1_infos, s2_v2_infos):
         mix_path = mix_info[0]
         s1_path = s1_v1_info[0]
@@ -232,9 +265,17 @@ def load_data_audio_visual(batch):
         # 读取视频数据
         v1 = np.load(v1_path)['data']
         v2 = np.load(v2_path)['data']
+
+        v1 = transform(v1)
+        v2 = transform(v2)
         # v1 and v2 must be numpy array
-        s = np.dstack((s1, s2))[0]  # 32000 x 2
-        v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
+        flag = np.random.choice(2, size=(1,), replace=True)
+        if flag:
+            s = np.dstack((s1, s2))[0]  # 32000 x 2
+            v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
+        else:
+            s = np.dstack((s2, s1))[0]  # 32000 x 2
+            v = np.stack((v2, v1)) # 2 x 50 x 96 x 96
         mixtures.append(mix)
         sources.append(s)
         faces.append(v)
