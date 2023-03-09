@@ -3,4 +3,6 @@ numpy
 adamp
 json5
 librosa
+soundfile 
+pyln
 asteroid

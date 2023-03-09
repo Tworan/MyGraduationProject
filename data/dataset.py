@@ -6,6 +6,7 @@ import torch
 import torch.utils.data as data
 import librosa
 import sys
+import soundfile as sf
 sys.path.append('/home/photon/MyGraduationProject/data')
 from preprocess import preprocess_one_dir
 from transform import get_preprocessing_pipeline
@@ -258,10 +259,13 @@ def load_data_audio_visual(batch, train=True):
         # print(mix_info, s1_v1_info, s2_v2_info)
         assert mix_info[1] == s1_v1_info[2] and s1_v1_info[2] == s2_v2_info[2]
         # 读取语音数据
-        mix, _ = librosa.load(mix_path, sr=sample_rate)
+        mix, _ = sf.read(mix_path)
+        mix = mix[:32000]
         # print(mix_path)
-        s1, _ = librosa.load(s1_path, sr=sample_rate)
-        s2, _ = librosa.load(s2_path, sr=sample_rate)
+        s1, _ = sf.read(s1_path)
+        s1 = s1[:32000]
+        s2, _ = sf.read(s2_path)
+        s2 = s2[:32000]
         # 读取视频数据
         v1 = np.load(v1_path)['data']
         v2 = np.load(v2_path)['data']
@@ -270,12 +274,12 @@ def load_data_audio_visual(batch, train=True):
         v2 = transform(v2)
         # v1 and v2 must be numpy array
         flag = np.random.choice(2, size=(1,), replace=True)
-        if flag:
-            s = np.dstack((s1, s2))[0]  # 32000 x 2
-            v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
-        else:
-            s = np.dstack((s2, s1))[0]  # 32000 x 2
-            v = np.stack((v2, v1)) # 2 x 50 x 96 x 96
+        # if flag:
+        s = np.dstack((s1, s2))[0]  # 32000 x 2
+        v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
+        # else:
+        #     s = np.dstack((s2, s1))[0]  # 32000 x 2
+        #     v = np.stack((v2, v1)) # 2 x 50 x 96 x 96
         mixtures.append(mix)
         sources.append(s)
         faces.append(v)
@@ -302,10 +306,13 @@ def load_data_audio_only(batch):
         
         assert mix_info[-1] == s1_info[-1] and s1_info[-1] == s2_info[-1]
         # 读取语音数据
-        mix, _ = librosa.load(mix_path, sr=sample_rate)
+        mix, _ = sf.read(mix_path)
+        mix = mix[:32000]
         # print(mix_path)
-        s1, _ = librosa.load(s1_path, sr=sample_rate)
-        s2, _ = librosa.load(s2_path, sr=sample_rate)
+        s1, _ = sf.read(s1_path)
+        s1 = s1[:32000]
+        s2, _ = sf.read(s2_path)
+        s2 = s2[:32000]
         # 读取视频数据
         # v1 and v2 must be numpy array
         s = np.dstack((s1, s2))[0]  # 32000 x 2
@@ -334,10 +341,10 @@ def load_mixtures_and_sources(batch):
         assert mix_info[1] == s1_info[1] and s1_info[1] == s2_info[1]
 
         # 读取语音数据
-        mix, _ = librosa.load(mix_path, sr=sample_rate)
+        mix, _ = sf.read(mix_path)
         # print(mix_path)
-        s1, _ = librosa.load(s1_path, sr=sample_rate)
-        s2, _ = librosa.load(s2_path, sr=sample_rate)
+        s1, _ = sf.read(s1_path)
+        s2, _ = sf.read(s2_path)
 
         # 将 s1 与 s2 合并
         s = np.dstack((s1, s2))[0]  # 32000 x 2
@@ -460,7 +467,9 @@ def load_mixtures(batch):
     for mix_info in mix_infos:
         mix_path = mix_info[0]
 
-        mix, _ = librosa.load(mix_path, sr=sample_rate)
+        mix, _ = sf.read(mix_path)
+        if len(mix) >= 32000:
+            mix = mix[:32000]
 
         mixtures.append(mix)
         filenames.append(mix_path)

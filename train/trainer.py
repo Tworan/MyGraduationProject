@@ -193,19 +193,29 @@ class Trainer(object):
             # print(padded_mixture.shape)
             # print(estimate_source.shape)
             # 计算损失
-            estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
-            loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
-                                                                                estimate_source,
-                                                                                mixture_lengths)
-            # if self.mode == 'audio-only':
-            #     estimate_source = self.model(padded_mixture)  # 将数据放入模型
-            #     loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
-            #                                                                        estimate_source,
-            #                                                                        mixture_lengths)
-            # elif self.mode == 'audio-visual':
-            #     estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
-            #     loss = self.loss_func(estimate_source, padded_source).mean()
-                # print(loss)
+            # estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
+            # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
+            #                                                                     estimate_source,
+            #                                                                     mixture_lengths)
+            if self.mode == 'audio-only':
+                estimate_source = self.model(padded_mixture)  # 将数据放入模型
+                loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
+                                                                                   estimate_source,
+                                                                                   mixture_lengths)
+            elif self.mode == 'audio-visual':
+                # padded_mixture: [B, 1, L]
+                # padded_face: [B, n_src, T, H, W]
+                B, n_src, T, H, W = padded_face.shape
+                losses = 0
+                for src in range(n_src):
+                    estimate_source = self.model(padded_mixture, padded_face[:, src: src+1, :, :, :])  # 将数据放入模型
+                    # print(estimate_source.shape, padded_source.shape)
+                    loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
+                                                                                        estimate_source,
+                                                                                        mixture_lengths)
+                    losses += loss
+                losses /= n_src
+
             if not cross_valid:
                 self.optimizer.zero_grad()
                 loss.backward()

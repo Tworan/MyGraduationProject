@@ -411,9 +411,9 @@ class Sandglasset(nn.Module):
         self.kernel_size = kernel_size
         self.stride = self.kernel_size // 2
         self.length = length
-        self.hidden_channles = hidden_channels
+        self.hidden_channels = hidden_channels
         self.num_layers = num_layers
-        self.bidirectinoal = bidirectional
+        self.bidirectional = bidirectional
         self.num_heads = num_heads
         self.depth = depth
         self.using_convT_to_upsample = using_convT_to_upsample

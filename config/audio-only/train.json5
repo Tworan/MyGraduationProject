@@ -99,14 +99,14 @@
 
   "save_load":
   {
-    "save_folder": "./checkpoint/",
+    "save_folder": "./audio_only_1/",
     "checkpoint": true,
-    "continue_from": "",
+    "continue_from": "", 
     "model_path": "final.path.tar",
   },
 
   "logging":
   {
-    "print_freq": 1,
+    "print_freq": 10,
   }
 }

@@ -1,5 +1,6 @@
 import argparse
 import torch
+import os
 from data.dataset import AudioDataLoader, AudioDataset
 from train.trainer import Trainer
 from models.sandglasset import Sandglasset
@@ -26,12 +27,14 @@ def main(config):
                               cv_max_len=config["validation_dataset"]["cv_max_len"])
 
     tr_loader = AudioDataLoader(_mode=config["model"]["mode"],
+                                _type='tr',
                                 dataset=tr_dataset,
                                 batch_size=config["train_loader"]["batch_size"],
                                 shuffle=config["train_loader"]["shuffle"],
                                 num_workers=config["train_loader"]["num_workers"])
 
     cv_loader = AudioDataLoader(_mode=config["model"]["mode"],
+                                _type='cv',
                                 dataset=cv_dataset,
                                 batch_size=config["validation_loader"]["batch_size"],
                                 shuffle=config["validation_loader"]["shuffle"],
@@ -68,6 +71,11 @@ def main(config):
     else:
         print("No loaded model! models: [\'sandglasset\', \'av_sandglasset\']")
 
+    # if os.path.exists(config['save_load']['save_folder']):
+    #     model = model.load_model_from_package(torch.load(config['save_load']['save_folder']+'final.path.tar'), config)
+    #     print('Resume model state from previous training task.')
+
+
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model)
         model.cuda()
@@ -101,6 +109,10 @@ def main(config):
     else:
         print("Not support optimizer")
         return
+    
+    # if os.path.exists(config['save_load']['save_folder']):
+    #     optimize.load_state_dict(torch.load(config['save_load']['save_folder']+'final.path.tar')['optim_dict'])
+    #     print('Resume optimizer state from previous training task.')
 
     trainer = Trainer(data, model, optimize, config)
 
@@ -112,7 +124,7 @@ if __name__ == '__main__':
 
     parser.add_argument("-C",
                         "--configuration",
-                        default="./config/train/train.json5",
+                        default="./config/audio-only/train.json5",
                         type=str,
                         help="Configuration (*.json).")
 

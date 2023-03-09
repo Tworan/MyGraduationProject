@@ -34,7 +34,7 @@ class VideoNet(nn.Module):
         return x
 
 class pre_v(nn.Module):
-    def __init__(self, videomodel, video_embeded_size=512, kernel_size=5, n_src=2):
+    def __init__(self, videomodel, video_embeded_size=512, kernel_size=5, n_src=1):
         """
         descripition: preprocess before the avfuse. 
         input: [B, n_src, T, H, W]
@@ -45,15 +45,15 @@ class pre_v(nn.Module):
         # video_features = model(input_video)
         # print(video_features.shape)
         self.videomodel.load_state_dict(torch.load(videomodel)['model_state_dict'])
-        self.spks_fuse = nn.Sequential(
-            nn.Conv2d(in_channels=video_embeded_size,
-                      out_channels=video_embeded_size,
-                      kernel_size=(n_src, kernel_size),
-                      stride=1,
-                      padding=[0, kernel_size//2],
-                      groups=video_embeded_size),
-            # nn.ReLU()
-        )
+        # self.spks_fuse = nn.Sequential(
+        #     nn.Conv2d(in_channels=video_embeded_size,
+        #               out_channels=video_embeded_size,
+        #               kernel_size=(n_src, kernel_size),
+        #               stride=1,
+        #               padding=[0, kernel_size//2],
+        #               groups=video_embeded_size),
+        #     # nn.ReLU()
+        # )
 
     def forward(self, v):
         B, n_src, T, H, W = v.shape
@@ -64,7 +64,7 @@ class pre_v(nn.Module):
         _, Nnew, Tnew = v.shape
         v = v.view(B, n_src, Nnew, Tnew)
         v = v.permute(0, 2, 1, 3).contiguous()
-        v = self.spks_fuse(v)
+        # v = self.spks_fuse(v)
         # v: [B, Nnew, 1, Tnew]
         v = v.permute(0, 2, 1, 3).contiguous().squeeze(1)
         # v: [B, Nnew, Tnew]
@@ -78,7 +78,7 @@ class AVfuse(nn.Module):
         接受audio和vision数据直接融合
         """
         super(AVfuse, self).__init__()
-        self.audio_conv = nn.Conv1d(in_channels=audio_in_channels*2, 
+        self.audio_conv = nn.Conv1d(in_channels=audio_in_channels+video_in_channels, 
                                     out_channels=audio_in_channels, 
                                     kernel_size=kernel_size,
                                     stride=stride,
@@ -90,7 +90,7 @@ class AVfuse(nn.Module):
 
             
             # nn.ReLU()
-        self.video_conv = nn.Conv1d(in_channels=video_in_channels*2, 
+        self.video_conv = nn.Conv1d(in_channels=video_in_channels+audio_in_channels, 
                                     out_channels=video_in_channels, 
                                     kernel_size=kernel_size,
                                     stride=stride,
@@ -139,23 +139,23 @@ class AVfuse(nn.Module):
         # print(a.shape, v.shape)
         residual_a = a
         residual_v = v
-        v = self.video_upsample(v)
-        v = v.permute(0, 2, 1).contiguous()
-        v = self.video_sub_norm(v)
-        v = v.permute(0, 2, 1).contiguous()
+        # v = self.video_upsample(v)
+        # v = v.permute(0, 2, 1).contiguous()
+        # v = self.video_sub_norm(v)
+        # v = v.permute(0, 2, 1).contiguous()
 
-        a = self.audio_downsample(a)
-        a = a.permute(0, 2, 1).contiguous()
-        a = self.audio_sub_norm(a)
-        a = a.permute(0, 2, 1).contiguous()
+        # a = self.audio_downsample(a)
+        # a = a.permute(0, 2, 1).contiguous()
+        # a = self.audio_sub_norm(a)
+        # a = a.permute(0, 2, 1).contiguous()
 
 
         sa = F.interpolate(v, size=residual_a.shape[-1], mode='nearest')
         sv = F.interpolate(a, size=residual_v.shape[-1], mode='nearest')
         # print(a.shape, sa.shape, v.shape, sv.shape)
         # print(residual_v.shape, residual_a.shape)
-        a = torch.cat([residual_a, sa], dim=1)
-        v = torch.cat([residual_v, sv], dim=1)
+        a = torch.cat([a, sa], dim=1)
+        v = torch.cat([v, sv], dim=1)
 
         a = self.audio_conv(a)
         v = self.video_conv(v)

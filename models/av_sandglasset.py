@@ -343,7 +343,7 @@ class Separation(nn.Module):
         gap = _gap
         for i in range(2*self.depth):
             x = self.Sandglasset_Blocks[i](x)
-            v = self.VidoNet(v)
+            # v = self.VidoNet(v)
             # reshape
             # x: [B, N, K, S]
             # AVfuse
@@ -436,7 +436,7 @@ class AVfusedSandglasset(nn.Module):
         self.using_convT_to_upsample = using_convT_to_upsample
         self.speakers = speakers
 
-        self.pre_v = pre_v(videomodel=video_model, video_embeded_size=512, kernel_size=5, n_src=self.speakers)
+        self.pre_v = pre_v(videomodel=video_model)
 
         # self.video_model = video_model
 
@@ -451,7 +451,7 @@ class AVfusedSandglasset(nn.Module):
                                      bidirectional=bidirectional,
                                      num_heads=num_heads,
                                      depth=depth,
-                                     speakers=speakers,
+                                     speakers=1,
                                      using_convT_to_upsample=using_convT_to_upsample)
         
         self.Decoder = Decoder(in_channels=in_channels, kernel_size=kernel_size)
@@ -462,16 +462,18 @@ class AVfusedSandglasset(nn.Module):
         output: [B, spk, L]
         """
         # x, 
+        # print(x.shape)
         x, gap = self._padding(x)
         e = self.Encoder(x)
         # v
         v = self.pre_v(v)
         
         m = self.Separation(e, v)
-        outs = [m[i] * e for i in range(self.speakers)]
-        audios = [self.Decoder(outs[i])[:, :, self.stride: -(gap+self.stride)] for i in range(self.speakers)]
+        out = m[0] * e 
+        # outs = [m[i] * e for i in range(self.speakers)]
+        audios = self.Decoder(out)[:, :, self.stride: -(gap+self.stride)]
         # audios: [[B, 1, L]]
-        return torch.cat(audios, dim=1)
+        return audios
 
     def _padding(self, x):
         """
