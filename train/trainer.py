@@ -5,7 +5,7 @@ import random
 from train.pit_criterion import cal_loss
 from torch.utils.tensorboard import SummaryWriter
 import gc
-from asteroid.losses.sdr import MultiSrcNegSDR, multisrc_neg_sisdr, singlesrc_neg_sisdr
+from train.sdr import MultiSrcNegSDR, multisrc_neg_sisdr, singlesrc_neg_sisdr
 
 
 class Trainer(object):
