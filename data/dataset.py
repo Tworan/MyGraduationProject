@@ -7,15 +7,15 @@ import torch.utils.data as data
 import librosa
 import sys
 import soundfile as sf
-sys.path.append('/home/photon/MyGraduationProject/data')
-from preprocess import preprocess_one_dir
-from transform import get_preprocessing_pipeline
+# sys.path.append('/home/photon/MyGraduationProject/data')
+from data.preprocess import preprocess_one_dir
+from data.transform import get_preprocessing_pipeline
 
 TRANSFORM_FLAG = False
 
 class AudioDataset(data.Dataset):
 
-    def __init__(self, json_dir, batch_size, mode='audio-only', sample_rate=8000, segment=2.0, cv_max_len=8.0):
+    def __init__(self, json_dir, batch_size, mode='audio-visual', sample_rate=8000, segment=2.0, cv_max_len=8.0):
 
         """
             Args:
@@ -54,6 +54,7 @@ class AudioDataset(data.Dataset):
         sorted_s2_list = sort(s2_list)
 
         # 只读取长度为 4 秒的语音
+        print(self.mode)
         if segment >= 0.0:
             segment_len = int(segment * sample_rate)  # 4s * 8000/s = 32000 samples
 
@@ -72,7 +73,6 @@ class AudioDataset(data.Dataset):
 
             mini_batch = []
             start = 0
-
             while True:
                 num_segments = 0
                 end = start
@@ -99,6 +99,9 @@ class AudioDataset(data.Dataset):
                     end += 1
 
                 if len(part_mix) > 0:
+                    if self.mode == 'audio-visual':
+                        mini_batch.append([part_mix, part_s2, part_s1, sample_rate, segment_len])
+
                     mini_batch.append([part_mix, part_s1, part_s2, sample_rate, segment_len])
 
                 if end == len(sorted_mix_list):
@@ -120,12 +123,17 @@ class AudioDataset(data.Dataset):
                 if int(sorted_mix_list[start][1]) > cv_max_len * sample_rate:
                     start = end
                     continue
-
+                if self.mode == 'audio-visual':
+                    mini_batch.append([sorted_mix_list[start:end],
+                                    sorted_s2_list[start:end],
+                                    sorted_s1_list[start:end],
+                                    sample_rate,
+                                    segment])
                 mini_batch.append([sorted_mix_list[start:end],
-                                  sorted_s1_list[start:end],
-                                  sorted_s2_list[start:end],
-                                  sample_rate,
-                                  segment])
+                                sorted_s1_list[start:end],
+                                sorted_s2_list[start:end],
+                                sample_rate,
+                                segment])
 
                 if end == len(sorted_mix_list):
                     break

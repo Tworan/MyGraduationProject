@@ -209,18 +209,18 @@ class Trainer(object):
                 B, n_src, T, H, W = padded_face.shape
                 # batch间独立同分布
                 # if not cross_valid:
-                src = random.randint(0, 1)
                 # else: 
                 #     src = 0
                 # losses = 0
 
-                estimate_source = self.model(padded_mixture, padded_face[:, src: src+1, :, :, :])  # 将数据放入模型
-                # print(estimate_source.shape, padded_source.shape)
-                # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
-                #                                                                     estimate_source,
-                #                                                                     mixture_lengths)
-                # print(estimate_source.shape, padded_mixture.shape)
-                loss = self.loss_func(estimate_source[:, 0, :], padded_source[:, src, :]).mean()
+                estimate_source = self.model(padded_mixture, padded_face[:, 0:1, :, :, :])  # 将数据放入模型
+                    
+                        # print(estimate_source.shape, padded_source.shape)
+                        # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
+                    #                                                                     estimate_source,
+        #                                                                     mixture_lengths)
+            # print(estimate_source.shape, padded_mixture.shape)
+                loss = self.loss_func(estimate_source[:, 0, :], padded_source[:, 0, :]).mean() 
 
             if not cross_valid:
                 self.optimizer.zero_grad()
