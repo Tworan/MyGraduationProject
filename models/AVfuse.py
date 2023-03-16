@@ -2,9 +2,178 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from VideoFeatureExtractor.VideoModel import VideoModel
+import math
+
+class Positional_Encoding(nn.Module):
+    """
+        Positional Encoding
+    """
+    def __init__(self, d_model, max_len=32000):
+        """
+        d_model: Feature
+        max_len: max lens of the seqs
+        """
+        super(Positional_Encoding, self).__init__()
+        pe = torch.zeros(max_len, d_model, requires_grad=False)
+        position = torch.arange(0, max_len).unsqueeze(1).float()
+        # position: [max_len, 1]
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        # pe: [1, max_len, d_model]
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+           input: [N, T, D]
+        """
+        length = x.size(1)
+        return self.pe[:, :length]
+    
+
+class VideoSegementation(nn.Module):
+    def __init__(self, K):
+        super(VideoSegementation, self).__init__()
+        self.K = K
+        self.P = K // 2
+    
+    def forward(self, v, a):
+        v = F.interpolate(v, size=a.shape[-1])
+        B, D, L = v.shape
+        v, gap = self._padding(v)
+        left_part = v[:, :, :-self.P].contiguous().view(B, D, -1, self.K)
+        right_part=  v[:, :, self.P:].contiguous().view(B, D, -1, self.K)
+        v = torch.cat([left_part, right_part], dim=3).view(B, D, -1, self.K)
+        # x: [B, N, S, K]
+        v = v.transpose(2, 3)
+        # x: [B, N, K, S]
+        return v.contiguous(), gap 
+    
+    def _padding(self, x):
+        """
+        describe: 填充至P的整数倍
+        input:  [B, N, L]
+        output: [B, N, L]
+        """
+        B, N, L = x.shape
+        gap = self.K - L % self.P
+        #     200 - 31999 % 100
+        pad = torch.zeros([B, N, gap]).to(x.device, dtype=torch.float)
+        x = torch.cat([x, pad], dim=2)
+        _pad = torch.zeros(size=(B, N, self.P)).to(x.device, dtype=torch.float)
+        x = torch.cat([_pad, x, _pad], dim=2)
+        return x, gap 
+
+class VideoRencoder(nn.Module):
+    def __init__(self, out_channels, video_embeded_size=512):
+        """
+        descripition: preprocess before the avfuse. 
+        input: [B, n_src, T, H, W]
+        output: [B, n_channels, T]
+        """
+        super(VideoRencoder, self).__init__()
+        self.out_channels = out_channels
+        self.video_embeded_size = video_embeded_size
+        self.pre_conv = torch.nn.ConvTranspose1d(in_channels=video_embeded_size,
+                                                out_channels=out_channels,
+                                                kernel_size=4,
+                                                stride=video_embeded_size//out_channels,
+                                                padding=2)
+
+
+    def forward(self, v):
+        # print(v.shape)
+        B, N, T = v.shape
+        v = self.pre_conv(v)
+        return v
+
+class CrossModalAttention(nn.Module):
+    def __init__(self, in_channels, num_heads):
+        super(CrossModalAttention, self).__init__()
+        self.LayerNorm1_s = nn.LayerNorm(normalized_shape=in_channels)
+        self.LayerNorm1_v = nn.LayerNorm(normalized_shape=in_channels)
+
+        self.Positional_Encoding = Positional_Encoding(d_model=in_channels, max_len=32000)
+        self.MultiheadCrossModalAttention_s2v = nn.MultiheadAttention(
+            embed_dim=in_channels,
+            num_heads=num_heads,
+            dropout=0.1,
+            batch_first=True 
+        )
+        self.MultiheadCrossModalAttention_v2s = nn.MultiheadAttention(
+            embed_dim=in_channels,
+            num_heads=num_heads,
+            dropout=0.1,
+            batch_first=True 
+        )
+
+        self.GlobalAttention_s2s = nn.MultiheadAttention(
+            embed_dim=in_channels,
+            num_heads=num_heads,
+            dropout=0.1,
+            batch_first=True 
+        )
+
+        self.GlobalAttention_v2v = nn.MultiheadAttention(
+            embed_dim=in_channels,
+            num_heads=num_heads,
+            dropout=0.1,
+            batch_first=True 
+        )
+        self.LayerNorm2_s = nn.LayerNorm(normalized_shape=in_channels)
+        self.LayerNorm2_v = nn.LayerNorm(normalized_shape=in_channels)
+        self.Dropout = nn.Dropout(p=0.1)
+        # self._lambda_s_s = torch.Tensor(1.)
+        # self._lambda_s_v = torch.Tensor(1.)
+        # self._lambda_v_v = torch.Tensor(1.)
+        # self._lambda_v_s = torch.Tensor(1.)
+
+    def forward(self, s, v):
+        """
+        s: [B, N, K, S]
+        v: [B, N, K, S]
+        """
+        B, N, K, S = s.shape 
+        residual_s1 = s
+        residual_v1 = v
+        s = s.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
+        v = v.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
+
+        s = self.LayerNorm1_s(s) + self.Positional_Encoding(s)
+        v = self.LayerNorm1_v(v) + self.Positional_Encoding(v)
+
+        residual_s2 = s
+        residual_v2 = v
+        # audio 通过query video得每一帧 得到对应的
+        v2s = self.MultiheadCrossModalAttention_v2s(s, v, v, attn_mask=None, key_padding_mask=None)[0]
+        s2v = self.MultiheadCrossModalAttention_s2v(v, s, s, attn_mask=None, key_padding_mask=None)[0]
+        s2s = self.GlobalAttention_s2s(s, s, s, attn_mask=None, key_padding_mask=None)[0]
+        v2v = self.GlobalAttention_v2v(v, v, v, attn_mask=None, key_padding_mask=None)[0]
+
+        s = v2s + s2s
+        v = s2v + v2v 
+
+        s = residual_s2 + self.Dropout(s)
+        v = residual_v2 + self.Dropout(v) 
+
+        s = self.LayerNorm2_s(s)
+        v = self.LayerNorm2_v(v)
+
+        s = s.view(B, K, S, N)
+        v = v.view(B, K, S, N)
+
+        s = s.permute(0, 3, 1, 2).contiguous()
+        v = v.permute(0, 3, 1, 2).contiguous()
+
+        s = s + residual_s1
+        v = v + residual_v1
+
+        return s, v
+    
 
 class VideoNet(nn.Module):
-    def __init__(self, in_channels, hidden_size=256, num_layers=1, bidirectional=True):
+    def __init__(self, in_channels, hidden_size=128, num_layers=1, bidirectional=True):
         super(VideoNet, self).__init__()
         self.LSTM = nn.LSTM(
             input_size=in_channels,
@@ -139,6 +308,7 @@ class AVfuse(nn.Module):
         # print(a.shape, v.shape)
         residual_a = a
         residual_v = v
+
         # v = self.video_upsample(v)
         # v = v.permute(0, 2, 1).contiguous()
         # v = self.video_sub_norm(v)
@@ -148,7 +318,6 @@ class AVfuse(nn.Module):
         # a = a.permute(0, 2, 1).contiguous()
         # a = self.audio_sub_norm(a)
         # a = a.permute(0, 2, 1).contiguous()
-
 
         sa = F.interpolate(v, size=residual_a.shape[-1], mode='nearest')
         sv = F.interpolate(a, size=residual_v.shape[-1], mode='nearest')

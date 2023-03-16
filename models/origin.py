@@ -55,7 +55,7 @@ class Segmentation(nn.Module):
         input2 = input[:, :, P:].contiguous().view(B, D, -1, self.K)  # torch.Size([1, 128, 161, 200])
 
         input = torch.cat([input1, input2], dim=3).view(B, D, -1, self.K).transpose(2, 3).contiguous()  # torch.Size([1, 128, 200, 322])
-        print(input.shape)
+        # print(input.shape)
         return input.contiguous(), gap
 
     def _padding(self, x):

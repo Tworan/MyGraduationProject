@@ -3,7 +3,7 @@ import torch.nn as nn
 import sys
 sys.path.append('/home/photon/MyGraduationProject')
 import math
-from models.AVfuse import AVfuse, pre_v, VideoNet
+from models.AVfuse import pre_v, VideoNet, CrossModalAttention, VideoSegementation, VideoRencoder
 from VideoFeatureExtractor.VideoModel import VideoModel
 
 class Encoder(nn.Module):
@@ -182,77 +182,116 @@ class Sandglasset_Block(nn.Module):
                  bidirectional=True, num_heads=8, kernel_size=1, stride=1, using_convT_to_upsample=True):
         super(Sandglasset_Block, self).__init__()
 
+
+        # video
         # Local RNN
-        self.Locally_Recurrent = Locally_Recurrent(in_channels=in_channels,
+        self.Locally_Recurrent_audio = Locally_Recurrent(in_channels=in_channels,
+                                                   hidden_channels=hidden_channels,
+                                                   num_layers=num_layers,
+                                                   bidirectional=bidirectional)
+        self.Locally_Recurrent_video = Locally_Recurrent(in_channels=in_channels,
                                                    hidden_channels=hidden_channels,
                                                    num_layers=num_layers,
                                                    bidirectional=bidirectional)
         # LayrNorm
-        self.LayerNorm = nn.LayerNorm(normalized_shape=in_channels)
-        
+        self.LayerNorm_audio = nn.LayerNorm(normalized_shape=in_channels)
+        self.LayerNorm_video = nn.LayerNorm(normalized_shape=in_channels)
+
         # Downsample
         # Use depth-wise convolution
-        self.Downsample = nn.Conv1d(in_channels=in_channels,
-                                    out_channels=in_channels,
-                                    kernel_size=kernel_size,
-                                    stride=stride,
-                                    padding=0,
-                                    groups=in_channels)
+        self.Downsample_audio = nn.Conv1d(in_channels=in_channels,
+                                        out_channels=in_channels,
+                                        kernel_size=kernel_size,
+                                        stride=stride,
+                                        padding=0,
+                                        groups=in_channels)
+        self.Downsample_video = nn.Conv1d(in_channels=in_channels,
+                                        out_channels=in_channels,
+                                        kernel_size=kernel_size,
+                                        stride=stride,
+                                        padding=0,
+                                        groups=in_channels)
+        
         # Globally Attentive
-        self.Globally_Attentive = Globally_Attentive(in_channels=in_channels,
-                                                     num_heads=num_heads)
+        self.CrossModal_Attention = CrossModalAttention(in_channels=in_channels,
+                                                        num_heads=num_heads)
         # Upsample
         if using_convT_to_upsample:
-            self.Upsample = nn.ConvTranspose1d(in_channels=in_channels,
-                                               out_channels=in_channels,
-                                               kernel_size=kernel_size,
-                                               stride=stride,
-                                               padding=0,)
-        else:
-            self.Upsample = nn.Sequential(nn.Upsample(scale_factor=kernel_size, mode='linear', align_corners=True),
-                                          nn.Conv1d(in_channels=in_channels,
+            self.Upsample_audio = nn.ConvTranspose1d(in_channels=in_channels,
                                                     out_channels=in_channels,
                                                     kernel_size=kernel_size,
-                                                    stride=1,
-                                                    padding='same',
-                                                    groups=in_channels))
+                                                    stride=stride,
+                                                    padding=0,)
+            self.Upsample_video = nn.ConvTranspose1d(in_channels=in_channels,
+                                                    out_channels=in_channels,
+                                                    kernel_size=kernel_size,
+                                                    stride=stride,
+                                                    padding=0,)
+            
+        else:
+            self.Upsample_audio = nn.Sequential(nn.Upsample(scale_factor=kernel_size, mode='linear', align_corners=True),
+                                                nn.Conv1d(in_channels=in_channels,
+                                                        out_channels=in_channels,
+                                                        kernel_size=kernel_size,
+                                                        stride=1,
+                                                        padding='same',
+                                                        groups=in_channels))
+            self.Upsample_video = nn.ConvTranspose1d(in_channels=in_channels,
+                                                    out_channels=in_channels,
+                                                    kernel_size=kernel_size,
+                                                    stride=stride,
+                                                    padding=0,)
     
-    def forward(self, x):
+    def forward(self, s, v):
         """
         input: [B, N, K, S]
         output: [B, N, K, S]
         """
-        B, N, K, S = x.shape
-        residual = x
-        x = self.Locally_Recurrent(x)
+        B, N, K, S = s.shape
+        residual_s = s
+        residual_v = v
+        s = self.Locally_Recurrent_audio(s)
+        v = self.Locally_Recurrent_video(v)
         # x: [B, N, K, S]
-        x = x.permute(0, 3, 2, 1).contiguous()
+        s = s.permute(0, 3, 2, 1).contiguous()
+        v = v.permute(0, 3, 2, 1).contiguous()
         # x: [B, S, K, N]
-        x = self.LayerNorm(x) 
-        x = x.permute(0, 3, 2, 1).contiguous() + residual
-        x = x.permute(0, 2, 1, 3).contiguous()
+        s = self.LayerNorm_audio(s) 
+        s = s.permute(0, 3, 2, 1).contiguous() + residual_s
+        s = s.permute(0, 2, 1, 3).contiguous()
+        v = self.LayerNorm_video(v) 
+        v = v.permute(0, 3, 2, 1).contiguous() + residual_v
+        v = v.permute(0, 2, 1, 3).contiguous()
         # x: [B, K, N, S]
         # do downsample
-        x = x.view(B*K, N, S)
+        s = s.view(B*K, N, S)
+        v = v.view(B*K, N, S)
         # x: [B*K, N, S]
         # print('down:', x.shape)
-        x = self.Downsample(x)
+        s = self.Downsample_audio(s)
+        v = self.Downsample_video(v)
         # x: [B*K, N, S/scale_factor]
-        x = x.view(B, K, N, -1)
+        s = s.view(B, K, N, -1)
+        v = v.view(B, K, N, -1)
         # x: [B, K, N, S/scale_factor]
-        x = x.permute(0, 2, 1, 3).contiguous()
+        s = s.permute(0, 2, 1, 3).contiguous()
+        v = v.permute(0, 2, 1, 3).contiguous()
         # x: [B, N, K, S/scale_factor]
-        x = self.Globally_Attentive(x)
+        s, v = self.CrossModal_Attention(s, v)
         # do upsample
-        x = x.permute(0, 2, 1, 3).contiguous()
+        s = s.permute(0, 2, 1, 3).contiguous()
+        v = v.permute(0, 2, 1, 3).contiguous()
         # x: [B, K, N, S/scale_factor]
-        x = x.view(B*K, N, -1)
+        s = s.view(B*K, N, -1)
+        v = v.view(B*K, N, -1)
         # print('cur:', x.shape)
-        x = self.Upsample(x)
+        s = self.Upsample_audio(s)
+        v = self.Upsample_video(v)
         # print('up:', x.shape)
-        x = x.view(B, K, N, S).permute(0, 2, 1, 3).contiguous()
+        s = s.view(B, K, N, S).permute(0, 2, 1, 3).contiguous()
+        v = v.view(B, K, N, S).permute(0, 2, 1, 3).contiguous()
         # x: [B, N, K, S]
-        return x 
+        return s, v 
     
 class Separation(nn.Module):
     def __init__(self, in_channels, out_channels, length, video_inchannels, hidden_channels=128,
@@ -267,6 +306,7 @@ class Separation(nn.Module):
         self.depth = depth
 
         self.VidoNet = VideoNet(in_channels=video_inchannels, hidden_size=hidden_channels)
+        
         kernel_size = []
         stride = []
         # 以4为缩放尺度 每层尺度*4
@@ -292,15 +332,9 @@ class Separation(nn.Module):
                                   using_convT_to_upsample=using_convT_to_upsample)
             )
         
-        self.AVfuse_Segmentation = [Segementation(K=length) for i in range(self.depth*2)]
+        self.videoSegementation = VideoSegementation(K=length)
 
-        self.AVfuse_net = AVfuse(audio_in_channels=out_channels,
-                                 video_in_channels=video_inchannels,
-                                 kernel_size=5,
-                                 stride=1,
-                                 groups=1,
-                                 using_residual=True)
-
+        self.videoRencoder = VideoRencoder(out_channels=out_channels)
         
         self.PReLU = nn.PReLU()
 
@@ -329,36 +363,37 @@ class Separation(nn.Module):
         
         self.ReLU = nn.ReLU()
 
-    def forward(self, x, v):
+    def forward(self, s, v):
         """
         input: [B, N, L]
         output: [B, N, L]
         """
-        x = x.permute(0, 2, 1).contiguous()
+        s = s.permute(0, 2, 1).contiguous()
         # x: [B, L, N]
-        x = self.LayerNorm(x)
-        x = self.Linear(x).permute(0, 2, 1).contiguous()
+        s = self.LayerNorm(s)
+        s = self.Linear(s).permute(0, 2, 1).contiguous()
         # x: [B, N, L]
-        x, _gap = self.Segementation(x)
+        x, _gap = self.Segementation(s)
         # 残差连接
-        self.residual = []
-        gap = _gap
+        v = self.videoRencoder(v)
+        v, _ = self.videoSegementation(v, s)
+        self.residual_s = []
+        self.residual_v = []
         for i in range(2*self.depth):
-            x = self.Sandglasset_Blocks[i](x)
-            v = self.VidoNet(v)
+            x, v = self.Sandglasset_Blocks[i](x, v)
             # reshape
             # x: [B, N, K, S]
             # AVfuse
-            residual = x
-            x = self._overlap_add(x, gap)
-            x, v = self.AVfuse_net(x, v)
-            x, gap = self.AVfuse_Segmentation[i](x)   
+            residual_s = x 
+            residual_v = v 
             
             if i < self.depth:
-                self.residual.append(residual)
+                self.residual_s.append(residual_s)
+                self.residual_v.append(residual_v)
             else:
                 # sum fuse
-                x = x + self.residual[2*self.depth - 1 - i]
+                x = x + self.residual_s[2*self.depth - 1 - i]
+                v = v + self.residual_v[2*self.depth - 1 - i]
                 # cat fuse
                 # x = torch.cat([x, self.residual[2*self.depth - 1 - i]], dim=-1)
         x = self.PReLU(x)
@@ -531,7 +566,7 @@ class AVfusedSandglasset(nn.Module):
 
 if __name__ == '__main__':
     input_audio = torch.randn(size=(1, 1, 32000)).to('cpu')
-    input_video = torch.randn(size=(1, 2, 100, 96, 96)).to('cpu')
+    input_video = torch.randn(size=(1, 1, 100, 96, 96)).to('cpu')
     # []
     model = VideoModel()
     # video_features = model(input_video)
@@ -544,7 +579,7 @@ if __name__ == '__main__':
     
     model = AVfusedSandglasset(in_channels=256,
                         out_channels=128,
-                        kernel_size=38,
+                        kernel_size=36,
                         length=256,
                         hidden_channels=128,
                         num_layers=1,
@@ -554,6 +589,6 @@ if __name__ == '__main__':
                         depth=3,
                         speakers=1,
                         video_model='frcnn_128_512.backbone.pth.tar',
-                        using_convT_to_upsample=False).cpu()
+                        using_convT_to_upsample=True).cpu()
     y = model(input_audio, input_video)
     print('pass')

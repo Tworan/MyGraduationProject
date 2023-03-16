@@ -1,10 +1,11 @@
 import os
 import time
 import torch
+import random
 from train.pit_criterion import cal_loss
 from torch.utils.tensorboard import SummaryWriter
 import gc
-from asteroid.losses.sdr import MultiSrcNegSDR, multisrc_neg_sisdr
+from asteroid.losses.sdr import MultiSrcNegSDR, multisrc_neg_sisdr, singlesrc_neg_sisdr
 
 
 class Trainer(object):
@@ -35,8 +36,8 @@ class Trainer(object):
         self.mode = config["model"]["mode"]
 
         # loss
-        self.tr_loss = torch.Tensor(self.epochs)
-        self.cv_loss = torch.Tensor(self.epochs)
+        self.tr_loss = torch.zeros(size=(self.epochs,))
+        self.cv_loss = torch.zeros(size=(self.epochs,))
 
         # 生成保存模型的文件夹
         os.makedirs(self.save_folder, exist_ok=True)
@@ -50,7 +51,7 @@ class Trainer(object):
 
         self._reset()
         # self.loss_func = MultiSrcNegSDR('sisdr')
-        self.loss_func = multisrc_neg_sisdr
+        self.loss_func = singlesrc_neg_sisdr
 
     def _reset(self):
         if self.continue_from:
@@ -83,7 +84,7 @@ class Trainer(object):
             tr_loss = self._run_one_epoch(epoch)  # 训练模型
 
             gc.collect()
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
             self.write.add_scalar("train loss", tr_loss, epoch+1)
 
@@ -206,15 +207,20 @@ class Trainer(object):
                 # padded_mixture: [B, 1, L]
                 # padded_face: [B, n_src, T, H, W]
                 B, n_src, T, H, W = padded_face.shape
-                losses = 0
-                for src in range(n_src):
-                    estimate_source = self.model(padded_mixture, padded_face[:, src: src+1, :, :, :])  # 将数据放入模型
-                    # print(estimate_source.shape, padded_source.shape)
-                    loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
-                                                                                        estimate_source,
-                                                                                        mixture_lengths)
-                    losses += loss
-                losses /= n_src
+                # batch间独立同分布
+                # if not cross_valid:
+                src = random.randint(0, 1)
+                # else: 
+                #     src = 0
+                # losses = 0
+
+                estimate_source = self.model(padded_mixture, padded_face[:, src: src+1, :, :, :])  # 将数据放入模型
+                # print(estimate_source.shape, padded_source.shape)
+                # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
+                #                                                                     estimate_source,
+                #                                                                     mixture_lengths)
+                # print(estimate_source.shape, padded_mixture.shape)
+                loss = self.loss_func(estimate_source[:, 0, :], padded_source[:, src, :]).mean()
 
             if not cross_valid:
                 self.optimizer.zero_grad()

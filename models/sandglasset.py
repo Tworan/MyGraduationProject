@@ -230,9 +230,9 @@ class Sandglasset_Block(nn.Module):
         # x: [B, N, K, S]
         x = x.permute(0, 3, 2, 1).contiguous()
         # x: [B, S, K, N]
-        x = self.LayerNorm(x)
+        x = self.LayerNorm(x).permute(0, 3, 2, 1).contiguous() + residual
 
-        x = x.permute(0, 2, 3, 1).contiguous()
+        x = x.permute(0, 2, 1, 3).contiguous()
         # x: [B, K, N, S]
         # do downsample
         x = x.view(B*K, N, S)

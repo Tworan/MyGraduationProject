@@ -3,8 +3,9 @@ import torch
 import os
 from data.dataset import AudioDataLoader, AudioDataset
 from train.trainer import Trainer
-from models.sandglasset import Sandglasset
+# from models.sandglasset import Sandglasset
 from models.av_sandglasset import AVfusedSandglasset
+from models.origin import Sandglasset
 import json5
 import numpy as np
 from adamp import AdamP, SGDP
@@ -52,8 +53,8 @@ def main(config):
                             num_layers=config["model"]["sandglasset"]["num_layers"],
                             bidirectional=config["model"]["sandglasset"]["bidirectional"],
                             num_heads=config["model"]["sandglasset"]["num_heads"],
-                            depth=config["model"]["sandglasset"]["depth"],
-                            # cycle_amount=config['model']['sandglasset']['depth']*2,
+                            # depth=config["model"]["sandglasset"]["depth"],
+                            cycle_amount=config['model']['sandglasset']['depth']*2,
                             speakers=config["model"]["sandglasset"]["speakers"])
     elif config["model"]["type"] == 'av_sandglasset':
         model = AVfusedSandglasset(in_channels=config["model"]["sandglasset"]["in_channels"],
