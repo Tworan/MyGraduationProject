@@ -5,7 +5,7 @@ from data.dataset import AudioDataLoader, AudioDataset
 from train.trainer import Trainer
 # from models.sandglasset import Sandglasset
 from models.av_sandglasset import AVfusedSandglasset
-from models.origin import Sandglasset
+from models.sandglasset import Sandglasset
 import json5
 import numpy as np
 from adamp import AdamP, SGDP
@@ -19,13 +19,15 @@ def main(config):
     tr_dataset = AudioDataset(json_dir=config["train_dataset"]["train_dir"],  # 目录下包含 mix.json, s1.json, s2.json
                               batch_size=config["train_dataset"]["batch_size"],
                               sample_rate=config["train_dataset"]["sample_rate"],  # 采样率
-                              segment=config["train_dataset"]["segment"])  # 语音时长
+                              segment=config["train_dataset"]["segment"],
+                              mode=config['model']['mode'])  # 语音时长
 
     cv_dataset = AudioDataset(json_dir=config["validation_dataset"]["validation_dir"],
                               batch_size=config["validation_dataset"]["batch_size"],
                               sample_rate=config["validation_dataset"]["sample_rate"],
                               segment=config["validation_dataset"]["segment"],
-                              cv_max_len=config["validation_dataset"]["cv_max_len"])
+                              cv_max_len=config["validation_dataset"]["cv_max_len"],
+                              mode=config['model']['mode'])
 
     tr_loader = AudioDataLoader(_mode=config["model"]["mode"],
                                 _type='tr',
@@ -53,8 +55,8 @@ def main(config):
                             num_layers=config["model"]["sandglasset"]["num_layers"],
                             bidirectional=config["model"]["sandglasset"]["bidirectional"],
                             num_heads=config["model"]["sandglasset"]["num_heads"],
-                            # depth=config["model"]["sandglasset"]["depth"],
-                            cycle_amount=config['model']['sandglasset']['depth']*2,
+                            depth=config["model"]["sandglasset"]["depth"],
+                            # cycle_amount=config['model']['sandglasset']['depth']*2,
                             speakers=config["model"]["sandglasset"]["speakers"])
     elif config["model"]["type"] == 'av_sandglasset':
         model = AVfusedSandglasset(in_channels=config["model"]["sandglasset"]["in_channels"],
