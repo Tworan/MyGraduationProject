@@ -99,27 +99,27 @@ class CrossModalAttention(nn.Module):
             embed_dim=in_channels,
             num_heads=num_heads,
             dropout=0.1,
-            batch_first=True 
+            # batch_first=True 
         )
         self.MultiheadCrossModalAttention_v2s = nn.MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
             dropout=0.1,
-            batch_first=True 
+            # batch_first=True 
         )
 
         self.GlobalAttention_s2s = nn.MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
             dropout=0.1,
-            batch_first=True 
+            # batch_first=True 
         )
 
         self.GlobalAttention_v2v = nn.MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
             dropout=0.1,
-            batch_first=True 
+            # batch_first=True 
         )
         self.LayerNorm2_s = nn.LayerNorm(normalized_shape=in_channels)
         self.LayerNorm2_v = nn.LayerNorm(normalized_shape=in_channels)
@@ -166,12 +166,14 @@ class CrossModalAttention(nn.Module):
         residual_s2 = s
         residual_v2 = v
         # audio 通过query video得每一帧 得到对应的
-
+        v = v.tranpose(0, 1)
+        s = s.tranpose(0, 1)
         v2s = self.MultiheadCrossModalAttention_v2s(v, s, s, attn_mask=None, key_padding_mask=None)[0]
         s2v = self.MultiheadCrossModalAttention_s2v(s, v, v, attn_mask=None, key_padding_mask=None)[0]
         s2s = self.GlobalAttention_s2s(s, s, s, attn_mask=None, key_padding_mask=None)[0]
         v2v = self.GlobalAttention_v2v(v, v, v, attn_mask=None, key_padding_mask=None)[0]
-
+        v = v.tranpose(0, 1)
+        s = s.tranpose(0, 1)
         s = s2s + gate_a * v2s
         v = v2v + gate_v * s2v 
 
