@@ -146,7 +146,7 @@ class Globally_Attentive(nn.Module):
         self.MultiheadAttention = nn.MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
-            dropout=0.1,
+            dropout=0.,
             batch_first=True 
         )
         self.LayerNorm2 = nn.LayerNorm(normalized_shape=in_channels)

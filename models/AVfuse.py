@@ -39,7 +39,7 @@ class VideoSegementation(nn.Module):
         self.P = K // 2
     
     def forward(self, v, a):
-        v = F.interpolate(v, size=a.shape[-1])
+        v = F.interpolate(v, size=a.shape[-1], mode='nearest')
         B, D, L = v.shape
         v, gap = self._padding(v)
         left_part = v[:, :, :-self.P].contiguous().view(B, D, -1, self.K)
@@ -77,9 +77,9 @@ class VideoRencoder(nn.Module):
         self.video_embeded_size = video_embeded_size
         self.pre_conv = torch.nn.ConvTranspose1d(in_channels=video_embeded_size,
                                                 out_channels=out_channels,
-                                                kernel_size=4,
+                                                kernel_size=8,
                                                 stride=video_embeded_size//out_channels,
-                                                padding=2)
+                                                padding=4)
 
 
     def forward(self, v):
@@ -123,11 +123,25 @@ class CrossModalAttention(nn.Module):
         )
         self.LayerNorm2_s = nn.LayerNorm(normalized_shape=in_channels)
         self.LayerNorm2_v = nn.LayerNorm(normalized_shape=in_channels)
-        self.Dropout = nn.Dropout(p=0.1)
+        self.Dropout_s = nn.Dropout(p=0.1)
+        self.Dropout_v = nn.Dropout(p=0.1)
         # self._lambda_s_s = torch.Tensor(1.)
         # self._lambda_s_v = torch.Tensor(1.)
         # self._lambda_v_v = torch.Tensor(1.)
         # self._lambda_v_s = torch.Tensor(1.)
+        self.gate_v = nn.Sequential(
+            nn.Conv1d(in_channels=in_channels,
+                      out_channels=in_channels,
+                      kernel_size=1,),
+            nn.Sigmoid()
+        )
+
+        self.gate_a = nn.Sequential(
+            nn.Conv1d(in_channels=in_channels,
+                      out_channels=in_channels,
+                      kernel_size=1,),
+            nn.Sigmoid()
+        )
 
     def forward(self, s, v):
         """
@@ -140,22 +154,32 @@ class CrossModalAttention(nn.Module):
         s = s.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
         v = v.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
 
-        s = self.LayerNorm1_s(s) + self.Positional_Encoding(s)
-        v = self.LayerNorm1_v(v) + self.Positional_Encoding(v)
+        # [B*K, S, N]
+        s = self.LayerNorm1_s(s)
+        gate_a = self.gate_a(s.transpose(1, 2)).transpose(1, 2)
+        s = s + self.Positional_Encoding(s)
+
+        v = self.LayerNorm1_v(v)
+        gate_v = self.gate_v(v.transpose(1, 2)).transpose(1, 2)        
+        v = v + self.Positional_Encoding(v)
 
         residual_s2 = s
         residual_v2 = v
         # audio 通过query video得每一帧 得到对应的
-        v2s = self.MultiheadCrossModalAttention_v2s(s, v, v, attn_mask=None, key_padding_mask=None)[0]
-        s2v = self.MultiheadCrossModalAttention_s2v(v, s, s, attn_mask=None, key_padding_mask=None)[0]
+
+        v2s = self.MultiheadCrossModalAttention_v2s(v, s, s, attn_mask=None, key_padding_mask=None)[0]
+        s2v = self.MultiheadCrossModalAttention_s2v(s, v, v, attn_mask=None, key_padding_mask=None)[0]
         s2s = self.GlobalAttention_s2s(s, s, s, attn_mask=None, key_padding_mask=None)[0]
         v2v = self.GlobalAttention_v2v(v, v, v, attn_mask=None, key_padding_mask=None)[0]
 
-        s = v2s + s2s
-        v = s2v + v2v 
+        s = s2s + gate_a * v2s
+        v = v2v + gate_v * s2v 
 
-        s = residual_s2 + self.Dropout(s)
-        v = residual_v2 + self.Dropout(v) 
+        # s = residual_s2 + self.Dropout_s(s)
+        # v = residual_v2 + self.Dropout_v(v) 
+
+        s = residual_s2 + s
+        v = residual_v2 + v
 
         s = self.LayerNorm2_s(s)
         v = self.LayerNorm2_v(v)
@@ -173,21 +197,30 @@ class CrossModalAttention(nn.Module):
     
 
 class VideoNet(nn.Module):
-    def __init__(self, in_channels, hidden_size=128, num_layers=1, bidirectional=True):
+    def __init__(self, in_channels, hidden_size=128, num_layers=1, bidirectional=True, _type='LSTM'):
         super(VideoNet, self).__init__()
-        self.LSTM = nn.LSTM(
-            input_size=in_channels,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            bias=True,
-            batch_first=True,
-            bidirectional=bidirectional)
-        self.layernorm = nn.LayerNorm(normalized_shape=in_channels)
-        self.linear = nn.Linear(
-            hidden_size*2 if bidirectional else hidden_size,
-            in_channels
-        )
-    
+        self._type = _type
+        if self._type == 'LSTM':
+            self.LSTM = nn.LSTM(
+                input_size=in_channels,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                bias=True,
+                batch_first=True,
+                bidirectional=bidirectional)
+            self.layernorm = nn.LayerNorm(normalized_shape=in_channels)
+            self.linear = nn.Linear(
+                hidden_size*2 if bidirectional else hidden_size,
+                in_channels
+            )
+        elif self._type == 'MHA':
+            self.MHA = nn.MultiheadAttention(
+                embed_dim=in_channels,
+                num_heads=8,
+                dropout=0.1
+            )
+            self.layernorm = nn.LayerNorm(normalized_shape=in_channels)
+        
     def forward(self, x):
         """
         input: [B, N, T]
@@ -195,10 +228,15 @@ class VideoNet(nn.Module):
         x = x.permute(0, 2, 1).contiguous()
         # x: [B, T, N]
         residual = x
-        x, _ = self.LSTM(x)
-        x = self.linear(x)
-        x += residual
-        x = self.layernorm(x)
+        if self._type == 'LSTM':
+            x, _ = self.LSTM(x)
+            x = self.linear(x)
+            x += residual
+            x = self.layernorm(x)
+        elif self._type == 'MHA':
+            x, _ = self.MHA(x)
+            x += residual
+            x = self.layernorm(x)
         x = x.permute(0, 2, 1).contiguous()
         return x
 
@@ -230,12 +268,12 @@ class pre_v(nn.Module):
         v = v.view(B*n_src, 1, T, H, W)
         with torch.no_grad():
             v = self.videomodel(v)
-        _, Nnew, Tnew = v.shape
-        v = v.view(B, n_src, Nnew, Tnew)
-        v = v.permute(0, 2, 1, 3).contiguous()
-        # v = self.spks_fuse(v)
-        # v: [B, Nnew, 1, Tnew]
-        v = v.permute(0, 2, 1, 3).contiguous().squeeze(1)
+        # _, Nnew, Tnew = v.shape
+        # v = v.view(B, n_src, Nnew, Tnew)
+        # v = v.permute(0, 2, 1, 3).contiguous()
+        # # v = self.spks_fuse(v)
+        # # v: [B, Nnew, 1, Tnew]
+        # v = v.permute(0, 2, 1, 3).contiguous().squeeze(1)
         # v: [B, Nnew, Tnew]
         return v
 
@@ -253,6 +291,7 @@ class AVfuse(nn.Module):
                                     stride=stride,
                                     padding='same',
                                     groups=groups)
+        
         self.audio_norm = nn.LayerNorm(audio_in_channels)
 
         self.video_norm = nn.LayerNorm(video_in_channels)
@@ -298,6 +337,20 @@ class AVfuse(nn.Module):
             # nn.ReLU()
 
         self.using_residual = using_residual
+
+        self.audio_gate = nn.Sequential(
+            nn.Conv1d(in_channels=audio_in_channels,
+                      out_channels=audio_in_channels,
+                      kernel_size=1,),
+            nn.Tanh()
+        )
+
+        self.video_gate = nn.Sequential(
+            nn.Conv1d(in_channels=video_in_channels,
+                      out_channels=video_in_channels,
+                      kernel_size=1,),
+            nn.Tanh()
+        )
     
     def forward(self, a, v):
         """
@@ -319,6 +372,9 @@ class AVfuse(nn.Module):
         # a = self.audio_sub_norm(a)
         # a = a.permute(0, 2, 1).contiguous()
 
+        v_gate = self.video_gate(v)
+        a_gate = self.audio_gate(a)
+
         sa = F.interpolate(v, size=residual_a.shape[-1], mode='nearest')
         sv = F.interpolate(a, size=residual_v.shape[-1], mode='nearest')
         # print(a.shape, sa.shape, v.shape, sv.shape)
@@ -335,8 +391,8 @@ class AVfuse(nn.Module):
         a = self.audio_norm(a)
         v = self.video_norm(v)
 
-        a = a.permute(0, 2, 1).contiguous()
-        v = v.permute(0, 2, 1).contiguous()
+        a = a.permute(0, 2, 1).contiguous() * a_gate
+        v = v.permute(0, 2, 1).contiguous() * v_gate
 
         if self.using_residual:
             a = a + residual_a

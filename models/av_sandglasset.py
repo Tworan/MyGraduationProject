@@ -5,6 +5,7 @@ sys.path.append('/home/photon/MyGraduationProject')
 import math
 from models.AVfuse import AVfuse, pre_v, VideoNet
 from VideoFeatureExtractor.VideoModel import VideoModel
+from utils.gLN import *
 
 class Encoder(nn.Module):
     def __init__(self, out_channels, kernel_size, act='relu'):
@@ -69,7 +70,7 @@ class Segementation(nn.Module):
         return x, gap 
 
 class Locally_Recurrent(nn.Module):
-    def __init__(self, in_channels, hidden_channels=128, num_layers=1, bidirectional=True):
+    def __init__(self, in_channels, hidden_channels=128, num_layers=1, bidirectional=True, norm_type='LN'):
         super(Locally_Recurrent, self).__init__()
         self.LSTM = nn.LSTM(
             input_size=in_channels,
@@ -79,7 +80,11 @@ class Locally_Recurrent(nn.Module):
             batch_first=True,
             bidirectional=bidirectional
         )
-        self.layerNorm = nn.LayerNorm(normalized_shape=in_channels)
+        self.norm_type = norm_type
+        if self.norm_type == 'gLN':
+            self.layerNorm = GlobLN(channel_size=in_channels)
+        elif self.norm_type == 'LN':
+            self.layerNorm = nn.LayerNorm(normalized_shape=in_channels)
         # 线形层
         self.linear = nn.Linear(
             hidden_channels * 2 if bidirectional else hidden_channels,
@@ -139,9 +144,15 @@ class Positional_Encoding(nn.Module):
         return self.pe[:, :length]
         
 class Globally_Attentive(nn.Module):
-    def __init__(self, in_channels, num_heads=8):
+    def __init__(self, in_channels, num_heads=8, norm_type='gLN'):
         super(Globally_Attentive, self).__init__()
-        self.LayerNorm1 = nn.LayerNorm(normalized_shape=in_channels)
+        self.norm_type = norm_type
+        if self.norm_type == 'gLN':
+            self.layerNorm1 = GlobLN(channel_size=in_channels)
+            self.layerNorm2 = GlobLN(channel_size=in_channels)
+        elif self.norm_type == 'LN':
+            self.layerNorm1 = nn.LayerNorm(normalized_shape=in_channels)
+            self.layerNorm2 = nn.LayerNorm(normalized_shape=in_channels)
         self.Positional_Encoding = Positional_Encoding(d_model=in_channels, max_len=32000)
         self.MultiheadAttention = nn.MultiheadAttention(
             embed_dim=in_channels,
@@ -149,7 +160,6 @@ class Globally_Attentive(nn.Module):
             dropout=0.1,
             batch_first=True 
         )
-        self.LayerNorm2 = nn.LayerNorm(normalized_shape=in_channels)
         self.Dropout = nn.Dropout(p=0.1)
 
     def forward(self, x):
@@ -179,16 +189,21 @@ class Sandglasset_Block(nn.Module):
     -> <Upsample>
     """
     def __init__(self, in_channels, hidden_channels=128, num_layers=1, 
-                 bidirectional=True, num_heads=8, kernel_size=1, stride=1, using_convT_to_upsample=True):
+                 bidirectional=True, num_heads=8, kernel_size=1, stride=1, using_convT_to_upsample=True, norm_type='gLN'):
         super(Sandglasset_Block, self).__init__()
 
         # Local RNN
         self.Locally_Recurrent = Locally_Recurrent(in_channels=in_channels,
                                                    hidden_channels=hidden_channels,
                                                    num_layers=num_layers,
-                                                   bidirectional=bidirectional)
+                                                   bidirectional=bidirectional,
+                                                   norm_type=norm_type)
         # LayrNorm
-        self.LayerNorm = nn.LayerNorm(normalized_shape=in_channels)
+        self.norm_type = norm_type
+        if self.norm_type == 'gLN':
+            self.layerNorm = GlobLN(channel_size=in_channels)
+        elif self.norm_type == 'LN':
+            self.layerNorm = nn.LayerNorm(normalized_shape=in_channels)
         
         # Downsample
         # Use depth-wise convolution
@@ -200,7 +215,8 @@ class Sandglasset_Block(nn.Module):
                                     groups=in_channels)
         # Globally Attentive
         self.Globally_Attentive = Globally_Attentive(in_channels=in_channels,
-                                                     num_heads=num_heads)
+                                                     num_heads=num_heads,
+                                                     norm_type=norm_type)
         # Upsample
         if using_convT_to_upsample:
             self.Upsample = nn.ConvTranspose1d(in_channels=in_channels,
@@ -256,9 +272,14 @@ class Sandglasset_Block(nn.Module):
     
 class Separation(nn.Module):
     def __init__(self, in_channels, out_channels, length, video_inchannels, hidden_channels=128,
-                 num_layers=1, bidirectional=True, num_heads=8, depth=6, speakers=2, using_convT_to_upsample=True):
+                 num_layers=1, bidirectional=True, num_heads=8, depth=6, speakers=2, using_convT_to_upsample=True, _type='LSTM', norm_type='gLN'):
         super(Separation, self).__init__()
-        self.LayerNorm = nn.LayerNorm(normalized_shape=in_channels)
+        self.norm_type = norm_type
+        if self.norm_type == 'gLN':
+            self.layerNorm = GlobLN(channel_size=in_channels)
+        elif self.norm_type == 'LN':
+            self.layerNorm = nn.LayerNorm(normalized_shape=in_channels)
+            
         # features expension
         self.Linear = nn.Linear(in_features=in_channels, out_features=out_channels)
         
@@ -266,7 +287,7 @@ class Separation(nn.Module):
 
         self.depth = depth
 
-        self.VidoNet = VideoNet(in_channels=video_inchannels, hidden_size=hidden_channels)
+        self.VidoNet = nn.ModuleList([VideoNet(in_channels=video_inchannels, hidden_size=hidden_channels, _type=_type) for i in range(self.depth*2)])
         kernel_size = []
         stride = []
         # 以4为缩放尺度 每层尺度*4
@@ -341,24 +362,28 @@ class Separation(nn.Module):
         # x: [B, N, L]
         x, _gap = self.Segementation(x)
         # 残差连接
-        self.residual = []
+        self.residual_x = []
+        self.residual_v = []
         gap = _gap
         for i in range(2*self.depth):
             x = self.Sandglasset_Blocks[i](x)
-            v = self.VidoNet(v)
+            v = self.VidoNet[i](v)
             # reshape
             # x: [B, N, K, S]
             # AVfuse
-            residual = x
+            residual_x = x
+            residual_v = v
             x = self._overlap_add(x, gap)
             x, v = self.AVfuse_net(x, v)
             x, gap = self.AVfuse_Segmentation[i](x)   
             
             if i < self.depth:
-                self.residual.append(residual)
+                self.residual_x.append(residual_x)
+                self.residual_v.append(residual_v)
             else:
                 # sum fuse
-                x = x + self.residual[2*self.depth - 1 - i]
+                x = x + self.residual_x[2*self.depth - 1 - i]
+                v = v + self.residual_v[2*self.depth - 1 - i]
                 # cat fuse
                 # x = torch.cat([x, self.residual[2*self.depth - 1 - i]], dim=-1)
         x = self.PReLU(x)

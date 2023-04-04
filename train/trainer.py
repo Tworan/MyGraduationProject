@@ -3,6 +3,7 @@ import time
 import torch
 import random
 from train.pit_criterion import cal_loss
+from train.eval_utils import *
 from torch.utils.tensorboard import SummaryWriter
 import gc
 from train.sdr import MultiSrcNegSDR, multisrc_neg_sisdr, singlesrc_neg_sisdr
@@ -45,6 +46,7 @@ class Trainer(object):
         self.best_val_loss = float("inf")
         self.halving = False
         self.val_no_improve = 0
+        self.eval_batchsize = config['validation_dataset']['batch_size']
 
         # 可视化
         self.write = SummaryWriter("./logs")
@@ -130,7 +132,7 @@ class Trainer(object):
             # 是否调整学习率
             if self.half_lr:
                 # 验证损失是否提升
-                if val_loss >= self.prev_val_loss:
+                if val_loss >= self.best_val_loss:
                     self.val_no_improve += 1  # 统计没有提升的次数
 
                     # 如果训练 3 个 epoch 没有提升，学习率减半
@@ -191,13 +193,7 @@ class Trainer(object):
                 padded_source = padded_source.cuda()
                 if self.mode == 'audio-visual':
                     padded_face = padded_face.cuda()
-            # print(padded_mixture.shape)
-            # print(estimate_source.shape)
-            # 计算损失
-            # estimate_source = self.model(padded_mixture, padded_face)  # 将数据放入模型
-            # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
-            #                                                                     estimate_source,
-            #                                                                     mixture_lengths)
+
             if self.mode == 'audio-only':
                 estimate_source = self.model(padded_mixture)  # 将数据放入模型
                 loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source,
@@ -207,19 +203,7 @@ class Trainer(object):
                 # padded_mixture: [B, 1, L]
                 # padded_face: [B, n_src, T, H, W]
                 B, n_src, T, H, W = padded_face.shape
-                # batch间独立同分布
-                # if not cross_valid:
-                # else: 
-                #     src = 0
-                # losses = 0
-
                 estimate_source = self.model(padded_mixture, padded_face[:, 0:1, :, :, :])  # 将数据放入模型
-                    
-                        # print(estimate_source.shape, padded_source.shape)
-                        # loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(padded_source[:, src: src+1, :],
-                    #                                                                     estimate_source,
-        #                                                                     mixture_lengths)
-            # print(estimate_source.shape, padded_mixture.shape)
                 loss = self.loss_func(estimate_source[:, 0, :], padded_source[:, 0, :]).mean() 
 
             if not cross_valid:
@@ -243,3 +227,43 @@ class Trainer(object):
                     flush=True)
 
         return total_loss/(i+1)
+
+    def _run_eval(self):
+        start_time = time.time()
+        assert self.eval_batchsize == 1
+        recorder = ALLMetricsTracker('eval.csv')
+
+        for i, (data) in enumerate(self.cv_loader):
+            if self.mode == 'audio-only':
+                padded_mixture, mixture_lengths, padded_source = data
+            elif self.mode == 'audio-visual':
+                padded_mixture, mixture_lengths, padded_source, padded_face = data
+
+            # 是否使用 GPU 训练
+            if torch.cuda.is_available():
+                padded_mixture = padded_mixture.cuda()
+                mixture_lengths = mixture_lengths.cuda()
+                padded_source = padded_source.cuda()
+                if self.mode == 'audio-visual':
+                    padded_face = padded_face.cuda()
+            # print(padded_mixture.shape)
+
+            if self.mode == 'audio-only':
+                with torch.no_grad():
+                    estimate_source = self.model(padded_mixture)  # 将数据放入模型
+                recorder(padded_mixture, padded_source, estimate_source, i)
+
+            elif self.mode == 'audio-visual':
+                # padded_mixture: [B, 1, L]
+                # padded_face: [B, n_src, T, H, W]
+                B, n_src, T, H, W = padded_face.shape
+                with torch.no_grad():
+                    estimate_source = self.model(padded_mixture, padded_face[:, 0:1, :, :, :])  # 将数据放入模型
+                    
+                recorder(padded_mixture[:, 0, :], padded_source[:, 0, :], estimate_source[:, 0, :], i)
+
+        end_time = time.time()
+        run_time = end_time - start_time
+        print('Run Time: {}'.format(run_time))
+
+        return

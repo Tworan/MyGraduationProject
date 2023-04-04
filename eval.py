@@ -3,10 +3,11 @@ import torch
 import os
 from data.dataset import AudioDataLoader, AudioDataset
 from train.trainer import Trainer
+from train.eval_utils import ALLMetricsTracker
 # from models.sandglasset import Sandglasset
-# from models.av_sandglasset import AVfusedSandglasset
+from models.av_sandglasset import AVfusedSandglasset
 from models.sandglasset import Sandglasset
-from models.av_sandglasset_attention import AVfusedSandglasset
+# from models.av_sandglasset_attention import AVfusedSandglasset
 import json5
 import numpy as np
 from adamp import AdamP, SGDP
@@ -117,18 +118,24 @@ def main(config):
     # if os.path.exists(config['save_load']['save_folder']):
     #     optimize.load_state_dict(torch.load(config['save_load']['save_folder']+'final.path.tar')['optim_dict'])
     #     print('Resume optimizer state from previous training task.')
-
+    def get_parameter_number(net):
+        total_num = sum(p.numel() for p in net.parameters())
+        trainable_num = sum(p.numel() for p in net.parameters() if p.requires_grad)
+        return {'Total': total_num, 'Trainable': trainable_num}
+    
+    get_parameter_number(model)
+    
     trainer = Trainer(data, model, optimize, config)
 
-    trainer.train()
-
+    trainer._run_eval()
+    print('Results saved to {}'.format('out.csv'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Speech Separation")
 
     parser.add_argument("-C",
                         "--configuration",
-                        default="./config/audio-only/train.json5",
+                        default="./config/audio-only/eval.json5",
                         type=str,
                         help="Configuration (*.json).")
 

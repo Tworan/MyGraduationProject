@@ -3,7 +3,7 @@
 
   "train_dataset":
   {
-    "train_dir": "./local/lrs3/tr",
+    "train_dir": "./local/lrs2/tr",
     "batch_size": 6,
     "sample_rate": 16000,
     "segment": -1,
@@ -11,8 +11,8 @@
 
   "validation_dataset":
   {
-    "validation_dir": "./local/lrs3/tt",
-    "batch_size": 1,
+    "validation_dir": "./local/lrs2/cv",
+    "batch_size": 16,
     "sample_rate": 16000,
     "segment": -1,
     "cv_max_len": 10,
@@ -22,14 +22,14 @@
   {
    "batch_size": 1,
    "shuffle": true,
-   "num_workers": 0,
+   "num_workers": 4,
   },
 
   "validation_loader":
   {
     "batch_size": 1,
     "shuffle": true,
-    "num_workers": 0,
+    "num_workers": 4,
   },
 
   "model":
@@ -48,7 +48,7 @@
       "bidirectional": true,
       "num_heads": 8,
       "depth": 3,
-      "speakers": 2,
+      "speakers": 1,
       "video_model": "/home/photon/MyGraduationProject/frcnn_128_512.backbone.pth.tar"
     }
   },
@@ -56,7 +56,7 @@
   "train":
   {
     "use_cuda": true,
-    "epochs": 100,
+    "epochs": 200,
     "half_lr": true,
     "early_stop": true,
     "max_norm": 5,
@@ -99,14 +99,14 @@
 
   "save_load":
   {
-    "save_folder": "./audio-visual_1_循环测试/",
+    "save_folder": "./exp/audio_visual_lrs2_avattention/",
     "checkpoint": true,
-    "continue_from": "", 
+    "continue_from": "final.path.tar", 
     "model_path": "final.path.tar",
   },
 
   "logging":
   {
-    "print_freq": 10,
+    "print_freq": 100,
   }
 }
