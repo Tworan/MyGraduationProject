@@ -117,8 +117,8 @@ class Trainer(object):
             self.model.eval()  # 将模型设置为验证模式
 
             start_time = time.time()  # 验证开始时间
-
-            val_loss = self._run_one_epoch(epoch, cross_valid=True)  # 验证模型
+            with torch.no_grad():
+                val_loss = self._run_one_epoch(epoch, cross_valid=True)  # 验证模型
 
             self.write.add_scalar("validation loss", val_loss, epoch+1)
 
@@ -204,7 +204,11 @@ class Trainer(object):
                 # padded_face: [B, n_src, T, H, W]
                 B, n_src, T, H, W = padded_face.shape
                 estimate_source = self.model(padded_mixture, padded_face[:, 0:1, :, :, :])  # 将数据放入模型
-                loss = self.loss_func(estimate_source[:, 0, :], padded_source[:, 0, :]).mean() 
+                ############################
+                # loss_1 = self.loss_func(estimate_source[0][:, 0, :], padded_source[:, 0, :]).mean() 
+                # loss_2 = self.loss_func(estimate_source[1][:, 0, :], padded_source[:, 0, :]).mean() 
+                # loss = loss_1 + loss_2 
+                loss = self.loss_func(estimate_source[0][:, 0, :], padded_source[:, 0, :]).mean()
 
             if not cross_valid:
                 self.optimizer.zero_grad()
