@@ -282,7 +282,7 @@ def load_data_audio_visual(batch, train=True):
         v1 = transform(v1)
         v2 = transform(v2)
         # v1 and v2 must be numpy array
-        flag = np.random.choice(2, size=(1,), replace=True)
+        # flag = np.random.choice(2, size=(1,), replace=True)
         # if flag:
         s = np.dstack((s1, s2))[0]  # 32000 x 2
         v = np.stack((v1, v2)) # 2 x 50 x 96 x 96
