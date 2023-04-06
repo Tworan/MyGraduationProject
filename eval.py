@@ -128,7 +128,7 @@ def main(config):
     trainer = Trainer(data, model, optimize, config)
 
     trainer._run_eval()
-    print('Results saved to {}'.format('out.csv'))
+    print('Results saved to {}'.format('eval.csv'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Speech Separation")
